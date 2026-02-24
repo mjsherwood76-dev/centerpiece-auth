@@ -1,0 +1,80 @@
+# Cloudflare Workers Configuration for Centerpiece Auth
+#
+# Deploy with: npm run deploy
+# Staging:     npm run deploy:staging
+
+name = "centerpiece-auth"
+main = "dist/worker.js"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database Binding
+# Create with: wrangler d1 create centerpiece-auth-db
+# After creation, update the database_id below with the actual ID.
+[[d1_databases]]
+binding = "AUTH_DB"
+database_name = "centerpiece-auth-db"
+database_id = "26717b6e-c8a2-430e-83ed-8664192c662e"
+
+# KV Namespace Bindings (read-only — for tenant branding lookups)
+[[kv_namespaces]]
+binding = "CANONICAL_INPUTS"
+id = "fa019b3c5cbd47a296291151def46355"
+preview_id = "ff8cb7cba7a14257951a894940c77fea"
+
+[[kv_namespaces]]
+binding = "TENANT_CONFIGS"
+id = "b8f70a1c8c274821970710fe8df10096"
+preview_id = "ee5142299d73451bbf76481b8b4d0c60"
+
+# Environment Variables
+[vars]
+ENVIRONMENT = "production"
+AUTH_DOMAIN = "https://auth.centerpiecelab.com"
+ACCESS_TOKEN_TTL_SECONDS = "900"
+REFRESH_TOKEN_TTL_DAYS = "30"
+AUTH_CODE_TTL_SECONDS = "60"
+
+# Secrets (set via `wrangler secret put`):
+#   JWT_PRIVATE_KEY  — ES256 PEM private key, base64-encoded
+#   JWT_PUBLIC_KEY   — ES256 PEM public key, base64-encoded
+#   GOOGLE_CLIENT_ID
+#   GOOGLE_CLIENT_SECRET
+#   FACEBOOK_APP_ID
+#   FACEBOOK_APP_SECRET
+#   APPLE_CLIENT_ID
+#   APPLE_CLIENT_SECRET
+#   APPLE_KEY_ID
+#   APPLE_TEAM_ID
+#   APPLE_PRIVATE_KEY — PEM, base64-encoded
+#   MICROSOFT_CLIENT_ID
+#   MICROSOFT_CLIENT_SECRET
+
+# Build configuration
+[build]
+command = "npm run build"
+
+# ------------------------------------------------------------------
+# Staging Environment
+# ------------------------------------------------------------------
+[env.staging]
+name = "centerpiece-auth-staging"
+vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://centerpiece-auth-staging.mjsherwood76.workers.dev", ACCESS_TOKEN_TTL_SECONDS = "900", REFRESH_TOKEN_TTL_DAYS = "30", AUTH_CODE_TTL_SECONDS = "60" }
+
+[[env.staging.d1_databases]]
+binding = "AUTH_DB"
+database_name = "centerpiece-auth-db"
+database_id = "26717b6e-c8a2-430e-83ed-8664192c662e"
+
+[[env.staging.kv_namespaces]]
+binding = "CANONICAL_INPUTS"
+id = "ff8cb7cba7a14257951a894940c77fea"
+
+[[env.staging.kv_namespaces]]
+binding = "TENANT_CONFIGS"
+id = "ee5142299d73451bbf76481b8b4d0c60"
+
+# Custom domain route (uncomment when DNS is configured)
+# [[routes]]
+# pattern = "auth.centerpiecelab.com/*"
+# zone_name = "centerpiecelab.com"

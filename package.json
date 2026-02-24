@@ -1,0 +1,25 @@
+{
+  "name": "centerpiece-auth",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/worker.ts --bundle --format=esm --outfile=dist/worker.js --platform=browser --target=es2022 --external:node:*",
+    "dev": "wrangler dev dist/worker.js --port 8788",
+    "deploy:staging": "npm run build && wrangler deploy --env staging",
+    "deploy": "npm run build && wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --tsconfig tsconfig.json --test test/**/*.test.ts",
+    "db:migrate:local": "wrangler d1 execute centerpiece-auth-db --local --file=migrations/0001_initial_schema.sql",
+    "db:migrate:staging": "wrangler d1 execute centerpiece-auth-db --env staging --file=migrations/0001_initial_schema.sql",
+    "db:migrate:prod": "wrangler d1 execute centerpiece-auth-db --file=migrations/0001_initial_schema.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260206.0",
+    "@types/node": "^22.10.2",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "wrangler": "^3.99.0"
+  }
+}

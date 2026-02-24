@@ -1,0 +1,31 @@
+# Copy this file to .dev.vars and fill in real values.
+# .dev.vars is gitignored — never commit actual secrets.
+#
+# Wrangler reads .dev.vars automatically during `wrangler dev`.
+
+# JWT signing keys (base64-encoded PEM)
+# Generate with:
+#   openssl ecparam -genkey -name prime256v1 -noout -out private.pem
+#   openssl ec -in private.pem -pubout -out public.pem
+#   base64 -w0 private.pem   (Linux) or [Convert]::ToBase64String([IO.File]::ReadAllBytes("private.pem"))  (PowerShell)
+JWT_PRIVATE_KEY=""
+JWT_PUBLIC_KEY=""
+
+# OAuth: Google
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+
+# OAuth: Facebook
+FACEBOOK_APP_ID=""
+FACEBOOK_APP_SECRET=""
+
+# OAuth: Apple
+APPLE_CLIENT_ID=""
+APPLE_CLIENT_SECRET=""
+APPLE_KEY_ID=""
+APPLE_TEAM_ID=""
+APPLE_PRIVATE_KEY=""
+
+# OAuth: Microsoft
+MICROSOFT_CLIENT_ID=""
+MICROSOFT_CLIENT_SECRET=""
