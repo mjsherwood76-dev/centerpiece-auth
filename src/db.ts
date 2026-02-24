@@ -123,6 +123,27 @@ export class AuthDB {
       .run();
   }
 
+  async updateUserName(userId: string, name: string): Promise<void> {
+    await this.db
+      .prepare('UPDATE users SET name = ? WHERE id = ?')
+      .bind(name, userId)
+      .run();
+  }
+
+  async updateUserAvatar(userId: string, avatarUrl: string): Promise<void> {
+    await this.db
+      .prepare('UPDATE users SET avatar_url = ? WHERE id = ?')
+      .bind(avatarUrl, userId)
+      .run();
+  }
+
+  async markEmailVerified(userId: string): Promise<void> {
+    await this.db
+      .prepare('UPDATE users SET email_verified = 1 WHERE id = ?')
+      .bind(userId)
+      .run();
+  }
+
   // ─── Tenant Memberships ─────────────────────────────────
 
   async getMembership(userId: string, tenantId: string): Promise<TenantMembershipRow | null> {

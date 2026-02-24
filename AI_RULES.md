@@ -120,15 +120,44 @@ src/
 ├── db.ts                  # D1 abstraction
 ├── branding.ts            # Tenant branding loader (KV) — Session 2
 ├── crypto/                # Cryptographic operations
-│   ├── passwords.ts       # Hash + verify — Session 3
+│   ├── passwords.ts       # PBKDF2-SHA-256 (100k iterations) — Session 3
 │   ├── jwt.ts             # Sign + verify JWT (ES256) — Session 3
 │   └── refreshTokens.ts   # Generate + rotate — Session 3
 ├── security/
-│   └── redirectValidator.ts # Redirect URL validation
+│   ├── redirectValidator.ts # Redirect URL validation — Session 3
+│   ├── rateLimit.ts       # Per-IP rate limits via KV — Session 6
+│   ├── headers.ts         # Security headers + CORS — Session 6
+│   └── auditLog.ts        # Structured audit logging — Session 6
 ├── handlers/              # Route handlers
 │   ├── health.ts
 │   ├── jwks.ts
-│   └── ...                # Session 3+
+│   ├── register.ts        # Email/password registration — Session 3
+│   ├── login.ts           # Email/password login — Session 3
+│   ├── token.ts           # Auth code → JWT exchange — Session 3
+│   ├── refresh.ts         # Refresh token rotation — Session 3
+│   ├── logout.ts          # Single/all session revocation — Session 3
+│   ├── forgotPassword.ts  # Request password reset — Session 6
+│   └── resetPassword.ts   # Complete password reset — Session 6
 ├── oauth/                 # OAuth provider integrations — Session 4
+│   ├── base.ts            # Shared OAuth utilities
+│   ├── callback.ts        # Shared callback handler
+│   ├── google.ts
+│   ├── facebook.ts
+│   ├── apple.ts
+│   └── microsoft.ts
 └── pages/                 # HTML page renderers — Session 2
+    ├── renderer.ts        # Base HTML renderer
+    ├── login.ts
+    ├── register.ts
+    └── resetPassword.ts   # Reset password page — Session 6
+test/
+├── helpers.ts             # Shared test utilities
+├── health-and-headers.test.ts
+├── pages.test.ts
+├── register.test.ts
+├── login.test.ts
+├── token-exchange.test.ts
+├── password-reset.test.ts
+├── jwks.test.ts
+└── redirect-validation.test.ts
 ```

@@ -160,8 +160,14 @@ These are the SAME KV namespaces used by `centerpiece-site-runtime` — shared r
 ### OAuth (Session 4)
 | Route | Method | Purpose |
 |-------|--------|---------|
-| `/oauth/{provider}` | GET | Initiate OAuth flow |
-| `/oauth/{provider}/callback` | GET/POST | OAuth callback |
+| `/oauth/google` | GET | Initiate Google OAuth (OIDC, PKCE) |
+| `/oauth/google/callback` | GET | Google OAuth callback |
+| `/oauth/facebook` | GET | Initiate Facebook OAuth |
+| `/oauth/facebook/callback` | GET | Facebook OAuth callback |
+| `/oauth/apple` | GET | Initiate Apple OAuth (OIDC) |
+| `/oauth/apple/callback` | POST | Apple OAuth callback (form_post) |
+| `/oauth/microsoft` | GET | Initiate Microsoft OAuth (OIDC, PKCE) |
+| `/oauth/microsoft/callback` | GET | Microsoft OAuth callback |
 
 ---
 
@@ -179,11 +185,76 @@ All redirect-producing endpoints validate the target URL against:
 - On use: old token is revoked, new token is issued in the same family
 - If a revoked token is presented → entire family is revoked (theft detection)
 
+### Password Hashing
+- PBKDF2-SHA-256 via Web Crypto API (`crypto.subtle`)
+- **100,000 iterations** (Cloudflare Workers maximum; combined with 32-byte random salts)
+- Format: `pbkdf2:{iterations}:{salt_hex}:{hash_hex}`
+- Constant-time verification using XOR comparison
+
+### Rate Limiting
+- Per-IP rate limits using KV counters (not D1 — KV is faster for hot-path writes)
+- Key pattern: `ratelimit:{ip}:{route}:{window}`
+- **Production:** 10 attempts per 15-minute window per IP per route
+- **Staging:** 200 attempts per window (to support integration test runs)
+- Rate-limited routes: `/api/login`, `/api/register`, `/api/forgot-password`, `/api/reset-password`
+- Fail-open: if KV is unavailable, requests are allowed (availability over strictness)
+
+### Security Headers
+All responses include:
+- `X-Frame-Options: DENY` (clickjacking prevention)
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`
+- `Content-Security-Policy` on HTML pages
+
+### CORS
+- CORS preflight (`OPTIONS`) validates `Origin` against controlled suffixes
+- Only known origins receive `Access-Control-Allow-Origin`
+- Allowed methods: `GET, POST, OPTIONS`
+- Credentials: allowed
+
+### Audit Logging
+- Structured JSON `console.log` for every auth event (for Cloudflare Logpush)
+- Events: `register_attempt`, `login_attempt`, `login_failure`, `logout`, `logout_all`,
+  `forgot_password`, `password_reset_success`, `password_reset_failure`,
+  `rate_limit_exceeded`, `oauth_callback`
+- Includes: IP, route, User-Agent, status code, timestamp
+
+### Password Reset Flow
+1. `POST /api/forgot-password` → generates random token, stores SHA-256 hash in D1
+2. (Stub) Logs reset URL to console (real email delivery in Phase 1B.3)
+3. Always returns generic success (account enumeration prevention)
+4. `POST /api/reset-password` → validates token hash + expiration, updates password, revokes all refresh tokens
+
 ### JWT Signing
 - ES256 (ECDSA P-256) — asymmetric
 - Auth Worker signs with private key
 - Runtime verifies with public key (fetched from JWKS endpoint)
 - `kid: "v1"` header for future key rotation
+
+### OAuth Architecture
+
+**Providers:** Google, Facebook, Apple, Microsoft
+
+**Flow:**
+1. User clicks OAuth button → `GET /oauth/{provider}?tenant=...&redirect=...`
+2. Auth Worker validates redirect URL, creates state entry in D1 (PKCE + nonce + 5-min TTL)
+3. Redirects to provider's authorization page
+4. Provider authenticates user, redirects to callback URL with authorization code
+5. Auth Worker validates state (CSRF protection), exchanges code for tokens
+6. Parses/validates provider's ID token (iss, aud, exp, nonce)
+7. Resolves user: find by OAuth link → find by email (if verified) → create new
+8. Issues refresh token + authorization code, redirects to tenant
+
+**PKCE:** Code verifier + S256 challenge for Google and Microsoft. Facebook and Apple
+do not support PKCE but we store verifiers for consistency.
+
+**Email Linking Rules:**
+- Provider confirms `email_verified === true` → link to existing user with same email
+- Provider does NOT verify email → create separate user (prevents account takeover)
+- Apple: email always verified; name only on first login
+
+**State Storage:** `oauth_states` D1 table with 5-minute TTL, consumed on callback (single-use)
 
 ---
 
@@ -204,7 +275,32 @@ npm run deploy
 
 # Run D1 migration
 npm run db:migrate:staging
+
+# Run integration tests (against staging)
+npm test
 ```
+
+---
+
+## Testing
+
+Integration tests run against the live staging Worker. **No local mocks.**
+
+- **Framework:** `node --test` via `tsx`
+- **Tests:** `test/**/*.test.ts` — HTTP requests to `https://centerpiece-auth-staging.mjsherwood76.workers.dev`
+- **Coverage:** 52 tests across health, security headers, CORS, pages, register, login, token exchange, password reset, JWKS, redirect validation
+
+Test files:
+| File | Tests | Area |
+|------|-------|------|
+| `health-and-headers.test.ts` | 10 | Health, security headers, CORS, 404 |
+| `pages.test.ts` | 7 | Login, register, reset-password page rendering |
+| `register.test.ts` | 7 | Registration flow |
+| `login.test.ts` | 5 | Login flow |
+| `token-exchange.test.ts` | 6 | Code → JWT exchange |
+| `password-reset.test.ts` | 7 | Forgot/reset password |
+| `jwks.test.ts` | 2 | JWKS endpoint |
+| `redirect-validation.test.ts` | 8 | Redirect URL validation |
 
 ---
 
