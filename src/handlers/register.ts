@@ -31,6 +31,8 @@ import {
   buildRefreshCookieHeader,
 } from '../crypto/refreshTokens.js';
 import { validateRedirectUrl } from '../security/redirectValidator.js';
+import { loadTenantBranding } from '../branding.js';
+import { sendWelcomeEmail } from '../email/send.js';
 
 /**
  * Handle POST /api/register
@@ -130,6 +132,14 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   // ── Create tenant membership (customer only — per security rules) ──
   const membershipId = generateUUID();
   await db.ensureMembership(membershipId, userId, tenantId);
+
+  // ── Send welcome email (non-blocking) ──
+  const branding = await loadTenantBranding(tenantParam || null, env);
+  const loginUrl = `${env.AUTH_DOMAIN}/login?tenant=${encodeURIComponent(tenantParam)}`;
+  await sendWelcomeEmail(env, email, name, loginUrl, branding, {
+    tenantId: tenantId || undefined,
+    userId,
+  });
 
   // ── Issue refresh token ──
   const refreshToken = generateRefreshToken();

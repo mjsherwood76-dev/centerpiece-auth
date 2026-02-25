@@ -31,6 +31,8 @@ preview_id = "ee5142299d73451bbf76481b8b4d0c60"
 [vars]
 ENVIRONMENT = "production"
 AUTH_DOMAIN = "https://auth.centerpiecelab.com"
+EMAIL_FROM = "noreply@centerpiecelab.com"
+EMAIL_FROM_NAME = "Centerpiece Lab"
 ACCESS_TOKEN_TTL_SECONDS = "900"
 REFRESH_TOKEN_TTL_DAYS = "30"
 AUTH_CODE_TTL_SECONDS = "60"
@@ -49,6 +51,7 @@ AUTH_CODE_TTL_SECONDS = "60"
 #   APPLE_PRIVATE_KEY — PEM, base64-encoded
 #   MICROSOFT_CLIENT_ID
 #   MICROSOFT_CLIENT_SECRET
+#   SENDGRID_API_KEY — SendGrid API key (Mail Send permission only)
 
 # Build configuration
 [build]
@@ -59,7 +62,7 @@ command = "npm run build"
 # ------------------------------------------------------------------
 [env.staging]
 name = "centerpiece-auth-staging"
-vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://centerpiece-auth-staging.mjsherwood76.workers.dev", ACCESS_TOKEN_TTL_SECONDS = "900", REFRESH_TOKEN_TTL_DAYS = "30", AUTH_CODE_TTL_SECONDS = "60" }
+vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://centerpiece-auth-staging.mjsherwood76.workers.dev", EMAIL_FROM = "noreply@centerpiecelab.com", EMAIL_FROM_NAME = "Centerpiece Lab", ACCESS_TOKEN_TTL_SECONDS = "900", REFRESH_TOKEN_TTL_DAYS = "30", AUTH_CODE_TTL_SECONDS = "60" }
 
 [[env.staging.d1_databases]]
 binding = "AUTH_DB"

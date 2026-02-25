@@ -20,6 +20,13 @@ export interface Env {
   JWT_PRIVATE_KEY: string;   // Base64-encoded ES256 PEM private key
   JWT_PUBLIC_KEY: string;    // Base64-encoded ES256 PEM public key
 
+  // Secrets (Email — Phase 1B.3)
+  SENDGRID_API_KEY?: string;  // Optional: email delivery disabled if not set
+
+  // Environment variables (Email — Phase 1B.3)
+  EMAIL_FROM: string;
+  EMAIL_FROM_NAME: string;
+
   // Secrets (OAuth providers — wired in Session 4)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;

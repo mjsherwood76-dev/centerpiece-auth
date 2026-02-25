@@ -21,6 +21,8 @@ import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
 import { sha256Hex } from '../crypto/jwt.js';
 import { hashPassword } from '../crypto/passwords.js';
+import { loadTenantBranding } from '../branding.js';
+import { sendPasswordChangedEmail } from '../email/send.js';
 
 /**
  * Handle POST /api/reset-password
@@ -95,6 +97,17 @@ export async function handleResetPassword(request: Request, env: Env): Promise<R
   await db.revokeAllRefreshTokensForUser(resetRow.user_id);
 
   console.log(`[PASSWORD_RESET] Password changed for user ${resetRow.user_id}. All sessions invalidated.`);
+
+  // ── Send password-changed notification (non-blocking) ──
+  const user = await db.getUserById(resetRow.user_id);
+  if (user) {
+    const branding = await loadTenantBranding(tenantParam || null, env);
+    const forgotPasswordUrl = `${env.AUTH_DOMAIN}/forgot-password?tenant=${encodeURIComponent(tenantParam)}`;
+    await sendPasswordChangedEmail(env, user.email, branding, forgotPasswordUrl, {
+      tenantId: tenantParam || undefined,
+      userId: resetRow.user_id,
+    });
+  }
 
   // ── Redirect to login with success message ──
   const params = new URLSearchParams();

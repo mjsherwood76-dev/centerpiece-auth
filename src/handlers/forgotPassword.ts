@@ -20,6 +20,8 @@ import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
 import { sha256Hex } from '../crypto/jwt.js';
 import { generateAuthCode } from '../crypto/refreshTokens.js';
+import { loadTenantBranding } from '../branding.js';
+import { sendPasswordResetEmail } from '../email/send.js';
 
 /**
  * Handle POST /api/forgot-password
@@ -77,19 +79,13 @@ export async function handleForgotPassword(request: Request, env: Env): Promise<
       expires_at: expiresAt,
     });
 
-    // ── STUB: Log the reset link ──
-    // Phase 1B.3 (Transactional Email) will wire SendGrid here.
-    // Hook point: call sendPasswordResetEmail(user.email, resetUrl, tenantBranding)
+    // ── Send password reset email ──
     const resetUrl = `${env.AUTH_DOMAIN}/reset-password?token=${resetToken}&tenant=${encodeURIComponent(tenantParam)}`;
-    console.log(`[PASSWORD_RESET_STUB] Reset link for ${user.email}: ${resetUrl}`);
-    console.log(`[PASSWORD_RESET_STUB] Token expires at: ${new Date(expiresAt * 1000).toISOString()}`);
-    // TODO: Phase 1B.3 — Replace above with:
-    // await sendPasswordResetEmail({
-    //   to: user.email,
-    //   resetUrl,
-    //   storeName: branding.storeName,
-    //   tenantBranding: branding,
-    // });
+    const branding = await loadTenantBranding(tenantParam || null, env);
+    await sendPasswordResetEmail(env, user.email, resetUrl, branding, {
+      tenantId: tenantParam || undefined,
+      userId: user.id,
+    });
   }
 
   // ── Always redirect with success message (never reveal email existence) ──
