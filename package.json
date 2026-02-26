@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/worker.ts --bundle --format=esm --outfile=dist/worker.js --platform=browser --target=es2022 --external:node:*",
+    "build": "node scripts/build-worker.js",
+    "build:worker": "node scripts/build-worker.js",
     "dev": "wrangler dev dist/worker.js --port 8788",
     "deploy:staging": "npm run build && wrangler deploy --env staging",
     "deploy": "npm run build && wrangler deploy",

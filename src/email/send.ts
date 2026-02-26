@@ -4,12 +4,13 @@
  * Non-blocking wrappers around SendGrid client + templates.
  * Each function:
  * - NEVER throws — catches all errors internally
- * - Logs structured JSON for observability
+ * - Logs structured JSON via ConsoleJsonLogger for observability
  * - Gracefully degrades when SENDGRID_API_KEY is not configured
  * - Redacts email addresses in logs
  */
 import type { Env } from '../types.js';
 import type { TenantBranding } from '../branding.js';
+import type { Logger } from '../core/logger.js';
 import { sendViaSendGrid } from './sendgridClient.js';
 import {
   buildPasswordResetEmail,
@@ -41,8 +42,29 @@ function redactEmail(email: string): string {
   return `***${email.slice(atIndex)}`;
 }
 
-function logEmailEvent(event: EmailLogEvent): void {
-  console.log(JSON.stringify(event));
+function logEmailEvent(
+  logger: Logger | null,
+  correlationId: string,
+  logEvent: EmailLogEvent,
+): void {
+  if (logger) {
+    const level = logEvent.event === 'email.failed' ? 'error' : 'info';
+    logger[level]({
+      correlationId,
+      event: logEvent.event,
+      type: logEvent.type,
+      to: logEvent.to,
+      ...(logEvent.statusCode != null ? { statusCode: logEvent.statusCode } : {}),
+      ...(logEvent.error ? { error: logEvent.error } : {}),
+      ...(logEvent.failureClass ? { failureClass: logEvent.failureClass } : {}),
+      ...(logEvent.tenantId ? { tenantId: logEvent.tenantId } : {}),
+      ...(logEvent.userId ? { userId: logEvent.userId } : {}),
+      ...(logEvent.reason ? { reason: logEvent.reason } : {}),
+    });
+  } else {
+    // Fallback for callers that haven't been updated yet
+    console.log(JSON.stringify(logEvent));
+  }
 }
 
 // ─── Branding Helpers ───────────────────────────────────────
@@ -68,13 +90,15 @@ export async function sendPasswordResetEmail(
   to: string,
   resetUrl: string,
   branding: TenantBranding,
-  context?: { tenantId?: string; userId?: string }
+  context?: { tenantId?: string; userId?: string; logger?: Logger; correlationId?: string }
 ): Promise<void> {
   const emailType: EmailType = 'password_reset';
   const redacted = redactEmail(to);
+  const logger = context?.logger ?? null;
+  const correlationId = context?.correlationId ?? 'unknown';
 
   if (!env.SENDGRID_API_KEY) {
-    logEmailEvent({
+    logEmailEvent(logger, correlationId, {
       event: 'email.skipped',
       type: emailType,
       to: redacted,
@@ -106,7 +130,7 @@ export async function sendPasswordResetEmail(
     });
 
     if (result.success) {
-      logEmailEvent({
+      logEmailEvent(logger, correlationId, {
         event: 'email.sent',
         type: emailType,
         to: redacted,
@@ -115,7 +139,7 @@ export async function sendPasswordResetEmail(
         userId: context?.userId,
       });
     } else {
-      logEmailEvent({
+      logEmailEvent(logger, correlationId, {
         event: 'email.failed',
         type: emailType,
         to: redacted,
@@ -127,7 +151,7 @@ export async function sendPasswordResetEmail(
       });
     }
   } catch (err) {
-    logEmailEvent({
+    logEmailEvent(logger, correlationId, {
       event: 'email.failed',
       type: emailType,
       to: redacted,
@@ -148,13 +172,15 @@ export async function sendWelcomeEmail(
   userName: string,
   loginUrl: string,
   branding: TenantBranding,
-  context?: { tenantId?: string; userId?: string }
+  context?: { tenantId?: string; userId?: string; logger?: Logger; correlationId?: string }
 ): Promise<void> {
   const emailType: EmailType = 'welcome';
   const redacted = redactEmail(to);
+  const logger = context?.logger ?? null;
+  const correlationId = context?.correlationId ?? 'unknown';
 
   if (!env.SENDGRID_API_KEY) {
-    logEmailEvent({
+    logEmailEvent(logger, correlationId, {
       event: 'email.skipped',
       type: emailType,
       to: redacted,
@@ -183,7 +209,7 @@ export async function sendWelcomeEmail(
     });
 
     if (result.success) {
-      logEmailEvent({
+      logEmailEvent(logger, correlationId, {
         event: 'email.sent',
         type: emailType,
         to: redacted,
@@ -192,7 +218,7 @@ export async function sendWelcomeEmail(
         userId: context?.userId,
       });
     } else {
-      logEmailEvent({
+      logEmailEvent(logger, correlationId, {
         event: 'email.failed',
         type: emailType,
         to: redacted,
@@ -204,7 +230,7 @@ export async function sendWelcomeEmail(
       });
     }
   } catch (err) {
-    logEmailEvent({
+    logEmailEvent(logger, correlationId, {
       event: 'email.failed',
       type: emailType,
       to: redacted,
@@ -224,13 +250,15 @@ export async function sendPasswordChangedEmail(
   to: string,
   branding: TenantBranding,
   forgotPasswordUrl: string,
-  context?: { tenantId?: string; userId?: string }
+  context?: { tenantId?: string; userId?: string; logger?: Logger; correlationId?: string }
 ): Promise<void> {
   const emailType: EmailType = 'password_changed';
   const redacted = redactEmail(to);
+  const logger = context?.logger ?? null;
+  const correlationId = context?.correlationId ?? 'unknown';
 
   if (!env.SENDGRID_API_KEY) {
-    logEmailEvent({
+    logEmailEvent(logger, correlationId, {
       event: 'email.skipped',
       type: emailType,
       to: redacted,
@@ -260,7 +288,7 @@ export async function sendPasswordChangedEmail(
     });
 
     if (result.success) {
-      logEmailEvent({
+      logEmailEvent(logger, correlationId, {
         event: 'email.sent',
         type: emailType,
         to: redacted,
@@ -269,7 +297,7 @@ export async function sendPasswordChangedEmail(
         userId: context?.userId,
       });
     } else {
-      logEmailEvent({
+      logEmailEvent(logger, correlationId, {
         event: 'email.failed',
         type: emailType,
         to: redacted,
@@ -281,7 +309,7 @@ export async function sendPasswordChangedEmail(
       });
     }
   } catch (err) {
-    logEmailEvent({
+    logEmailEvent(logger, correlationId, {
       event: 'email.failed',
       type: emailType,
       to: redacted,

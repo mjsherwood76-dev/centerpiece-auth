@@ -28,8 +28,9 @@ const DEV_ORIGINS = ['http://localhost', 'http://127.0.0.1'];
 /**
  * Add security headers to a response.
  * Creates a new Response with the security headers appended.
+ * Optionally merges trace headers (x-trace-id, Server-Timing).
  */
-export function addSecurityHeaders(response: Response): Response {
+export function addSecurityHeaders(response: Response, traceHeaders?: Record<string, string>): Response {
   const headers = new Headers(response.headers);
 
   // Prevent clickjacking
@@ -81,6 +82,13 @@ export function addSecurityHeaders(response: Response): Response {
       'Permissions-Policy',
       'camera=(), microphone=(), geolocation=(), payment=()'
     );
+  }
+
+  // Merge trace headers (x-trace-id, Server-Timing) if provided
+  if (traceHeaders) {
+    for (const [key, value] of Object.entries(traceHeaders)) {
+      headers.set(key, value);
+    }
   }
 
   return new Response(response.body, {

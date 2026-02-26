@@ -9,13 +9,11 @@
  * - Logout
  * - Rate limit hits
  *
- * Current implementation: structured console.log (captured by
- * Cloudflare Workers tail logs / Logpush).
- *
- * Future: can be extended to write to D1 audit table or external
- * logging service (e.g., Sentry, Logflare).
+ * Uses ConsoleJsonLogger for structured JSON output with correlation IDs.
+ * All events are prefixed with `auth.audit.` for easy filtering in
+ * Workers Observability and Logpush.
  */
-import type { Env } from '../types.js';
+import type { Logger } from '../core/logger.js';
 
 export interface AuditEvent {
   /** Event type (e.g., 'login_attempt', 'register_attempt', 'password_reset_success') */
@@ -30,6 +28,8 @@ export interface AuditEvent {
   userId?: string;
   /** HTTP status code of the response */
   statusCode?: number;
+  /** Correlation ID for request tracing */
+  correlationId?: string;
   /** Additional event-specific details */
   details?: Record<string, unknown>;
 }
@@ -37,22 +37,18 @@ export interface AuditEvent {
 /**
  * Log an auth event for the audit trail.
  *
- * Uses structured JSON logging so events are machine-parseable
- * in Cloudflare Workers tail logs and Logpush.
+ * Uses structured JSON logger so events are machine-parseable
+ * in Cloudflare Workers Observability and Logpush.
  */
-export async function logAuthEvent(_env: Env, event: AuditEvent): Promise<void> {
-  const logEntry = {
-    type: 'AUTH_AUDIT',
-    timestamp: new Date().toISOString(),
-    event: event.event,
+export function logAuthEvent(logger: Logger, event: AuditEvent): void {
+  logger.info({
+    correlationId: event.correlationId || 'unknown',
+    event: `auth.audit.${event.event}`,
     ip: event.ip,
     route: event.route,
     userAgent: event.userAgent || null,
     userId: event.userId || null,
     statusCode: event.statusCode || null,
     details: event.details || null,
-  };
-
-  // Structured log — captured by Cloudflare Workers Logpush / tail
-  console.log(JSON.stringify(logEntry));
+  });
 }
