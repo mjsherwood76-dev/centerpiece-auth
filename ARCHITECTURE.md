@@ -258,6 +258,55 @@ do not support PKCE but we store verifiers for consistency.
 
 ---
 
+## Ingress / Egress
+
+### Inputs
+
+| Input | Source | Mechanism | Description |
+|-------|--------|-----------|-------------|
+| HTTP requests | Browsers, `centerpiece-site-runtime` | HTTPS to `auth.centerpiecelab.com` | Login, register, OAuth, token exchange, refresh, password reset |
+| `CANONICAL_INPUTS` KV | Shared KV namespace (uploaded by `centerpiece-dev`) | KV read (read-only) | Theme tokens (brands, styles) for tenant-branded login pages |
+| `TENANT_CONFIGS` KV | Shared KV namespace | KV read (read-only) | Tenant configuration for domain validation and branding |
+| D1 database (`AUTH_DB`) | Cloudflare D1 | SQL queries | Users, memberships, OAuth accounts, tokens, auth codes, password resets |
+| OAuth provider tokens | Google, Facebook, Apple, Microsoft | HTTPS callback | Authorization codes exchanged for ID tokens |
+| Stripe/CPL secrets | Cloudflare Secrets | Environment variables | API keys, signing keys (never in source) |
+
+### Outputs
+
+| Output | Consumer | Mechanism | Description |
+|--------|----------|-----------|-------------|
+| HTML pages | Browser | HTTP response (`Content-Type: text/html`) | Login, register, and reset-password pages (tenant-branded) |
+| JSON API responses | `centerpiece-site-runtime`, browser JS | HTTP response (`Content-Type: application/json`) | Registration results, login results, error messages |
+| JWT access tokens | `centerpiece-site-runtime` | `cp_access` HttpOnly cookie on tenant domain | ES256-signed, 15-min TTL, audience-scoped |
+| Refresh tokens | Browser (auth domain only) | HttpOnly cookie (`SameSite=Lax`) on auth domain | 30-day TTL, family-based rotation |
+| Auth codes | `centerpiece-site-runtime` | URL query parameter (`?code=...`) via redirect | One-time, 60-sec TTL, SHA-256 hash stored in D1 |
+| JWKS public key | `centerpiece-site-runtime` | `GET /.well-known/jwks.json` | ES256 public key for JWT verification |
+| Audit log events | Cloudflare Logpush | `console.log` (structured JSON) | `register_attempt`, `login_failure`, `logout`, etc. |
+| D1 writes | Cloudflare D1 | SQL INSERT/UPDATE | User records, memberships, token records, OAuth state |
+
+### Data Contracts
+
+| Contract | Format | Location | Breaking Change Policy |
+|----------|--------|----------|------------------------|
+| JWKS endpoint | JSON (`{ keys: [{ kty, crv, x, y, kid, alg, use }] }`) | `/.well-known/jwks.json` | Adding keys is safe; removing/changing `kid` is breaking |
+| JWT claims | `{ sub, aud, iss, exp, iat, tid, role, kid }` | Access token payload | Adding claims is safe; removing/renaming is breaking |
+| Auth code exchange | `POST /api/token { code, redirect_uri }` → `{ access_token, token_type, expires_in }` | `/api/token` | Changing request/response shape is breaking |
+| Redirect flow | `302` redirect with `?code=` parameter to validated `redirect_uri` | Login/register handlers | Changing redirect behavior is breaking |
+| Rate limit responses | `429 Too Many Requests` with `Retry-After` header | Rate-limited routes | Changing status code is breaking |
+
+### Public Contracts Summary
+
+| Contract Type | Examples |
+|---------------|----------|
+| HTTP endpoints | `/api/login`, `/api/register`, `/api/token`, `/api/refresh`, `/.well-known/jwks.json` |
+| JWT format | ES256-signed, `kid: "v1"`, claims: `sub`, `aud`, `tid`, `role` |
+| Cookie names | `cp_access` (tenant domain), `cp_refresh` (auth domain) |
+| KV bindings (read-only) | `CANONICAL_INPUTS`, `TENANT_CONFIGS` |
+| D1 database | `AUTH_DB` (7 tables: users, tenant_memberships, oauth_accounts, auth_codes, refresh_tokens, oauth_states, password_reset_tokens) |
+| Environment variables | `ENVIRONMENT`, `AUTH_DOMAIN`, `JWT_PRIVATE_KEY`, rate limit config |
+
+---
+
 ## Build & Deploy
 
 ```bash
