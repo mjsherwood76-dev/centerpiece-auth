@@ -98,12 +98,15 @@ export async function handleOAuthCallback(
   const codeTtlSeconds = parseInt(env.AUTH_CODE_TTL_SECONDS || '60', 10);
   const codeExpiresAt = Math.floor(Date.now() / 1000) + codeTtlSeconds;
 
+  // ── Determine audience from redirect URL ──
+  const aud = resolveAudience(redirectUrl);
+
   await db.insertAuthCode({
     code_hash: authCodeHash,
     user_id: userId,
     tenant_id: tenantId,
     redirect_origin: redirectValidation.origin,
-    aud: 'storefront',
+    aud,
     expires_at: codeExpiresAt,
   });
 
@@ -217,4 +220,26 @@ async function resolveUser(db: AuthDB, profile: OAuthUserProfile): Promise<strin
   });
 
   return newUserId;
+}
+
+// ─── Audience Determination ─────────────────────────────────
+
+/** Admin domain patterns for audience determination. */
+const ADMIN_DOMAINS = [
+  'admin.centerpiecelab.com',
+  'centerpiece-admin-staging.pages.dev',
+];
+
+/**
+ * Determine whether the auth flow is for the admin SPA or the storefront.
+ * For OAuth callbacks, we derive audience from the redirect URL stored in OAuth state.
+ */
+function resolveAudience(redirectUrl: string): 'storefront' | 'admin' {
+  try {
+    const hostname = new URL(redirectUrl).hostname;
+    if (ADMIN_DOMAINS.includes(hostname)) return 'admin';
+  } catch {
+    // Invalid URL — fall through to storefront
+  }
+  return 'storefront';
 }

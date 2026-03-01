@@ -35,7 +35,7 @@ import { validateRedirectUrl } from '../security/redirectValidator.js';
  * Handle POST /api/login
  *
  * Accepts form-urlencoded body (from the login page form):
- *   email, password, tenant, redirect
+ *   email, password, tenant, redirect, audience?, code_challenge?
  */
 export async function handleLogin(request: Request, env: Env): Promise<Response> {
   const db = new AuthDB(env.AUTH_DB);
@@ -46,6 +46,8 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   let password: string;
   let tenantParam: string;
   let redirectUrl: string;
+  let audienceParam: string;
+  let codeChallenge: string;
 
   try {
     const contentType = request.headers.get('Content-Type') || '';
@@ -65,6 +67,8 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
     password = body.password || '';
     tenantParam = (body.tenant || '').trim();
     redirectUrl = (body.redirect || '').trim();
+    audienceParam = (body.audience || '').trim();
+    codeChallenge = (body.code_challenge || '').trim();
   } catch {
     return errorRedirect(env, '', '', 'invalid_credentials');
   }
@@ -137,13 +141,18 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   const codeTtlSeconds = parseInt(env.AUTH_CODE_TTL_SECONDS || '60', 10);
   const codeExpiresAt = Math.floor(Date.now() / 1000) + codeTtlSeconds;
 
+  // ── Determine audience (admin vs storefront) ──
+  const aud = resolveAudience(redirectUrl, audienceParam);
+
   await db.insertAuthCode({
     code_hash: authCodeHash,
     user_id: user.id,
     tenant_id: tenantId,
     redirect_origin: redirectValidation.origin,
-    aud: 'storefront',
+    aud,
     expires_at: codeExpiresAt,
+    code_challenge: aud === 'admin' && codeChallenge ? codeChallenge : null,
+    code_challenge_method: aud === 'admin' && codeChallenge ? 'S256' : null,
   });
 
   // ── Redirect with code ──
@@ -207,4 +216,31 @@ function errorRedirect(env: Env, tenant: string, redirect: string, error: string
       'Cache-Control': 'no-store',
     },
   });
+}
+
+/** Admin domain patterns for audience determination. */
+const ADMIN_DOMAINS = [
+  'admin.centerpiecelab.com',
+  'centerpiece-admin-staging.pages.dev',
+];
+
+/**
+ * Determine whether the auth flow is for the admin SPA or the storefront.
+ *
+ * Admin audience is set when:
+ * - The redirect_uri points to an admin domain, OR
+ * - The `audience=admin` query/form parameter is set
+ */
+function resolveAudience(
+  redirectUrl: string,
+  audienceParam: string
+): 'storefront' | 'admin' {
+  if (audienceParam === 'admin') return 'admin';
+  try {
+    const hostname = new URL(redirectUrl).hostname;
+    if (ADMIN_DOMAINS.includes(hostname)) return 'admin';
+  } catch {
+    // Invalid URL — fall through to storefront
+  }
+  return 'storefront';
 }

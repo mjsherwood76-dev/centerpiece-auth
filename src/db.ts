@@ -25,7 +25,7 @@ export interface TenantMembershipRow {
   id: string;
   user_id: string;
   tenant_id: string;
-  role: 'customer' | 'seller' | 'platform_admin';
+  role: 'customer' | 'seller' | 'supplier' | 'platform_admin';
   status: 'active' | 'suspended' | 'invited';
   created_at: string;
 }
@@ -46,6 +46,8 @@ export interface AuthCodeRow {
   aud: 'storefront' | 'admin';
   expires_at: number;
   created_at: string;
+  code_challenge: string | null;
+  code_challenge_method: 'S256' | null;
 }
 
 export interface RefreshTokenRow {
@@ -158,16 +160,55 @@ export class AuthDB {
    * Ensure a tenant membership exists for a user.
    * Only creates with role 'customer' — per security rules, never auto-create
    * seller or platform_admin roles.
+   *
+   * Note: UNIQUE(user_id, tenant_id, role) after 0002_multi_role migration,
+   * so ON CONFLICT targets the role-specific row.
    */
   async ensureMembership(membershipId: string, userId: string, tenantId: string): Promise<void> {
     await this.db
       .prepare(
         `INSERT INTO tenant_memberships (id, user_id, tenant_id, role, status)
          VALUES (?, ?, ?, 'customer', 'active')
-         ON CONFLICT(user_id, tenant_id) DO NOTHING`
+         ON CONFLICT(user_id, tenant_id, role) DO NOTHING`
       )
       .bind(membershipId, userId, tenantId)
       .run();
+  }
+
+  /**
+   * Get all active non-customer memberships for a user.
+   * Used during admin token issuance to populate roles + primaryTenantId.
+   */
+  async getAdminMemberships(
+    userId: string
+  ): Promise<Array<{ tenant_id: string; role: string }>> {
+    const result = await this.db
+      .prepare(
+        `SELECT tenant_id, role FROM tenant_memberships
+         WHERE user_id = ? AND role != 'customer' AND status = 'active'
+         ORDER BY created_at ASC`
+      )
+      .bind(userId)
+      .all<{ tenant_id: string; role: string }>();
+    return result.results;
+  }
+
+  /**
+   * Get all memberships for a user (all roles, all tenants).
+   * Used by GET /api/memberships endpoint.
+   */
+  async getAllMemberships(
+    userId: string
+  ): Promise<TenantMembershipRow[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT * FROM tenant_memberships
+         WHERE user_id = ?
+         ORDER BY created_at ASC`
+      )
+      .bind(userId)
+      .all<TenantMembershipRow>();
+    return result.results;
   }
 
   // ─── OAuth Accounts ─────────────────────────────────────
@@ -208,11 +249,13 @@ export class AuthDB {
     redirect_origin: string;
     aud: 'storefront' | 'admin';
     expires_at: number;
+    code_challenge?: string | null;
+    code_challenge_method?: 'S256' | null;
   }): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO auth_codes (code_hash, user_id, tenant_id, redirect_origin, aud, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO auth_codes (code_hash, user_id, tenant_id, redirect_origin, aud, expires_at, code_challenge, code_challenge_method)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         code.code_hash,
@@ -220,7 +263,9 @@ export class AuthDB {
         code.tenant_id,
         code.redirect_origin,
         code.aud,
-        code.expires_at
+        code.expires_at,
+        code.code_challenge ?? null,
+        code.code_challenge_method ?? null
       )
       .run();
   }

@@ -42,6 +42,7 @@ export async function handleRefresh(request: Request, env: Env): Promise<Respons
   const url = new URL(request.url);
   const tenantParam = url.searchParams.get('tenant') || '';
   const redirectUrl = url.searchParams.get('redirect') || '';
+  const audienceParam = url.searchParams.get('audience') || '';
 
   // ── Validate redirect URL ──
   if (!redirectUrl) {
@@ -121,12 +122,15 @@ export async function handleRefresh(request: Request, env: Env): Promise<Respons
   const codeTtlSeconds = parseInt(env.AUTH_CODE_TTL_SECONDS || '60', 10);
   const codeExpiresAt = Math.floor(Date.now() / 1000) + codeTtlSeconds;
 
+  // ── Determine audience (admin vs storefront) ──
+  const aud = resolveAudience(redirectUrl, audienceParam);
+
   await db.insertAuthCode({
     code_hash: authCodeHash,
     user_id: existingToken.user_id,
     tenant_id: tenantId,
     redirect_origin: redirectValidation.origin,
-    aud: 'storefront',
+    aud,
     expires_at: codeExpiresAt,
   });
 
@@ -178,4 +182,27 @@ function redirectToLogin(
     status: 302,
     headers,
   });
+}
+
+/** Admin domain patterns for audience determination. */
+const ADMIN_DOMAINS = [
+  'admin.centerpiecelab.com',
+  'centerpiece-admin-staging.pages.dev',
+];
+
+/**
+ * Determine whether the auth flow is for the admin SPA or the storefront.
+ */
+function resolveAudience(
+  redirectUrl: string,
+  audienceParam: string
+): 'storefront' | 'admin' {
+  if (audienceParam === 'admin') return 'admin';
+  try {
+    const hostname = new URL(redirectUrl).hostname;
+    if (ADMIN_DOMAINS.includes(hostname)) return 'admin';
+  } catch {
+    // Invalid URL — fall through to storefront
+  }
+  return 'storefront';
 }

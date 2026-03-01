@@ -31,6 +31,7 @@ import { handleMicrosoftOAuthInit, handleMicrosoftOAuthCallback } from './oauth/
 import { handleForgotPassword } from './handlers/forgotPassword.js';
 import { handleResetPassword } from './handlers/resetPassword.js';
 import { handleResetPasswordPage } from './pages/resetPassword.js';
+import { handleMemberships } from './handlers/memberships.js';
 import { checkRateLimit } from './security/rateLimit.js';
 import { addSecurityHeaders, handleCorsPreflightValidated } from './security/headers.js';
 import { logAuthEvent } from './security/auditLog.js';
@@ -203,6 +204,11 @@ export default {
           statusCode: response.status,
           correlationId,
         });
+        return addSecurityHeaders(response, trace.getResponseHeaders());
+      }
+
+      if (method === 'GET' && path === '/api/memberships') {
+        response = await handleMemberships(request, env);
         return addSecurityHeaders(response, trace.getResponseHeaders());
       }
 
