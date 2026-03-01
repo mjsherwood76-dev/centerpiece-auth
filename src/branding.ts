@@ -88,7 +88,11 @@ export async function loadTenantBranding(
 
   if (tenantId) {
     try {
-      const tenantConfig = await env.TENANT_CONFIGS.get(tenantId, 'json') as Record<string, unknown> | null;
+      // KV key uses `tenant:{id}` prefix (aligned with runtime + D1→KV sync)
+      const record = await env.TENANT_CONFIGS.get(`tenant:${tenantId}`, 'json') as Record<string, unknown> | null;
+      // D1→KV sync stores TenantConfigRecord wrapper — extract inner config.
+      // Fallback to record itself for legacy KV entries without a wrapper.
+      const tenantConfig = (record?.config ?? record) as Record<string, unknown> | null;
       if (tenantConfig) {
         // Extract theme IDs from tenant config
         const rawBrand = typeof tenantConfig.brandThemeId === 'string' ? tenantConfig.brandThemeId : '';
