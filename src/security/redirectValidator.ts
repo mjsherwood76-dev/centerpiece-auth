@@ -18,6 +18,7 @@ const CONTROLLED_SUFFIXES = [
   '.centerpiece.shop',
   '.centerpiece.app',
   '.centerpiece.io',
+  '.centerpiecelab.com',
   '.workers.dev',
   '.pages.dev',
 ];
