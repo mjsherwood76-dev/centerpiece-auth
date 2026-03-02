@@ -40,6 +40,7 @@ AUTH_CODE_TTL_SECONDS = "60"
 # Secrets (set via `wrangler secret put`):
 #   JWT_PRIVATE_KEY  — ES256 PEM private key, base64-encoded
 #   JWT_PUBLIC_KEY   — ES256 PEM public key, base64-encoded
+#   INTERNAL_SECRET  — Shared secret for internal service-to-service calls (runtime → auth)
 #   GOOGLE_CLIENT_ID
 #   GOOGLE_CLIENT_SECRET
 #   FACEBOOK_APP_ID

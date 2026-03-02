@@ -194,6 +194,30 @@ export class AuthDB {
   }
 
   /**
+   * Create a tenant membership with a specific role.
+   * Used by POST /api/internal/memberships for seller/supplier provisioning.
+   *
+   * Unlike ensureMembership() which hard-codes 'customer', this method
+   * accepts any allowed role. Caller is responsible for role authorization.
+   *
+   * UNIQUE(user_id, tenant_id, role) prevents duplicates.
+   */
+  async createMembership(
+    membershipId: string,
+    userId: string,
+    tenantId: string,
+    role: 'seller' | 'supplier',
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO tenant_memberships (id, user_id, tenant_id, role, status)
+         VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(membershipId, userId, tenantId, role)
+      .run();
+  }
+
+  /**
    * Get all memberships for a user (all roles, all tenants).
    * Used by GET /api/memberships endpoint.
    */

@@ -32,6 +32,7 @@ import { handleForgotPassword } from './handlers/forgotPassword.js';
 import { handleResetPassword } from './handlers/resetPassword.js';
 import { handleResetPasswordPage } from './pages/resetPassword.js';
 import { handleMemberships } from './handlers/memberships.js';
+import { handleInternalMemberships } from './handlers/internalMemberships.js';
 import { checkRateLimit } from './security/rateLimit.js';
 import { addSecurityHeaders, handleCorsPreflightValidated } from './security/headers.js';
 import { logAuthEvent } from './security/auditLog.js';
@@ -209,6 +210,20 @@ export default {
 
       if (method === 'GET' && path === '/api/memberships') {
         response = await handleMemberships(request, env);
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      // --- Internal API (service-to-service, not user-facing) ---
+      if (method === 'POST' && path === '/api/internal/memberships') {
+        response = await handleInternalMemberships(request, env);
+        logAuthEvent(logger, {
+          event: 'internal_membership_create',
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          statusCode: response.status,
+          correlationId,
+        });
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 

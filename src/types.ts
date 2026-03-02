@@ -27,6 +27,9 @@ export interface Env {
   EMAIL_FROM: string;
   EMAIL_FROM_NAME: string;
 
+  // Secret for internal service-to-service calls (e.g. runtime → auth)
+  INTERNAL_SECRET?: string;
+
   // Secrets (OAuth providers — wired in Session 4)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
