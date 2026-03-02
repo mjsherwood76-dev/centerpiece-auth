@@ -62,7 +62,8 @@ command = "npm run build"
 # ------------------------------------------------------------------
 [env.staging]
 name = "centerpiece-auth-staging"
-vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://centerpiece-auth-staging.mjsherwood76.workers.dev", EMAIL_FROM = "noreply@centerpiecelab.com", EMAIL_FROM_NAME = "Centerpiece Lab", ACCESS_TOKEN_TTL_SECONDS = "900", REFRESH_TOKEN_TTL_DAYS = "30", AUTH_CODE_TTL_SECONDS = "60" }
+workers_dev = true
+vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://auth.centerpiecelab.com", EMAIL_FROM = "noreply@centerpiecelab.com", EMAIL_FROM_NAME = "Centerpiece Lab", ACCESS_TOKEN_TTL_SECONDS = "900", REFRESH_TOKEN_TTL_DAYS = "30", AUTH_CODE_TTL_SECONDS = "60" }
 
 [[env.staging.d1_databases]]
 binding = "AUTH_DB"
