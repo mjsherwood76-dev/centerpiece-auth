@@ -87,7 +87,7 @@ export default {
               'Content-Type': 'application/json',
               'Retry-After': String(rateLimitResult.retryAfterSeconds),
             },
-          }), trace.getResponseHeaders());
+          }), trace.getResponseHeaders(), request, env);
         }
       }
 
@@ -96,29 +96,29 @@ export default {
       // --- Health ---
       if (method === 'GET' && path === '/health') {
         response = await handleHealth(env, correlationId);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       // --- JWKS (public key for JWT verification) ---
       if (method === 'GET' && path === '/.well-known/jwks.json') {
         response = await handleJWKS(env);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       // --- Pages ---
       if (method === 'GET' && path === '/login') {
         response = await handleLoginPage(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'GET' && path === '/register') {
         response = await handleRegisterPage(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'GET' && path === '/reset-password') {
         response = await handleResetPasswordPage(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       // --- API endpoints ---
@@ -132,7 +132,7 @@ export default {
           statusCode: response.status,
           correlationId,
         });
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'POST' && path === '/api/login') {
@@ -145,17 +145,17 @@ export default {
           statusCode: response.status,
           correlationId,
         });
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'POST' && path === '/api/token') {
         response = await handleTokenExchange(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'GET' && path === '/api/refresh') {
         response = await handleRefresh(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'POST' && path === '/api/logout') {
@@ -167,7 +167,7 @@ export default {
           userAgent: request.headers.get('User-Agent'),
           correlationId,
         });
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'POST' && path === '/api/logout-all') {
@@ -179,7 +179,7 @@ export default {
           userAgent: request.headers.get('User-Agent'),
           correlationId,
         });
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'POST' && path === '/api/forgot-password') {
@@ -191,7 +191,7 @@ export default {
           userAgent: request.headers.get('User-Agent'),
           correlationId,
         });
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'POST' && path === '/api/reset-password') {
@@ -204,33 +204,33 @@ export default {
           statusCode: response.status,
           correlationId,
         });
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'GET' && path === '/api/memberships') {
         response = await handleMemberships(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       // --- OAuth initiation routes ---
       if (method === 'GET' && path === '/oauth/google') {
         response = await handleGoogleOAuthInit(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'GET' && path === '/oauth/facebook') {
         response = await handleFacebookOAuthInit(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'GET' && path === '/oauth/apple') {
         response = await handleAppleOAuthInit(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'GET' && path === '/oauth/microsoft') {
         response = await handleMicrosoftOAuthInit(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       // --- OAuth callback routes ---
@@ -244,7 +244,7 @@ export default {
           correlationId,
           details: { provider: 'google' },
         });
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'GET' && path === '/oauth/facebook/callback') {
@@ -257,7 +257,7 @@ export default {
           correlationId,
           details: { provider: 'facebook' },
         });
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       // Apple uses form POST for callbacks (response_mode: form_post)
@@ -271,7 +271,7 @@ export default {
           correlationId,
           details: { provider: 'apple' },
         });
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       if (method === 'GET' && path === '/oauth/microsoft/callback') {
@@ -284,14 +284,14 @@ export default {
           correlationId,
           details: { provider: 'microsoft' },
         });
-        return addSecurityHeaders(response, trace.getResponseHeaders());
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
       // --- 404 ---
       return addSecurityHeaders(new Response(JSON.stringify({ error: 'Not found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
-      }), trace.getResponseHeaders());
+      }), trace.getResponseHeaders(), request, env);
     } catch (err) {
       logger.error({
         correlationId,
@@ -305,7 +305,7 @@ export default {
       return addSecurityHeaders(new Response(JSON.stringify({ error: 'Internal server error' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
-      }), trace.getResponseHeaders());
+      }), trace.getResponseHeaders(), request, env);
     }
   },
 } satisfies ExportedHandler<Env>;

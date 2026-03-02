@@ -50,7 +50,7 @@ export async function handleAppleOAuthInit(request: Request, env: Env): Promise<
   const validation = await validateOAuthInitiation(request, env);
   if (validation instanceof Response) return validation;
 
-  const { tenantId, redirectUrl } = validation;
+  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience } = validation;
 
   // Create OAuth state with nonce (Apple supports OIDC)
   const { state, nonce } = await createOAuthState(
@@ -58,7 +58,10 @@ export async function handleAppleOAuthInit(request: Request, env: Env): Promise<
     'apple',
     tenantId,
     redirectUrl,
-    true // useNonce for OIDC
+    true, // useNonce for OIDC
+    clientCodeChallenge,
+    clientCodeChallengeMethod,
+    audience
   );
 
   // Build Apple authorization URL
@@ -165,7 +168,7 @@ export async function handleAppleOAuthCallback(request: Request, env: Env): Prom
     return oauthErrorRedirect(env, stateData.tenantId, stateData.redirectUrl, 'oauth_failed');
   }
 
-  return handleOAuthCallback(request, env, profile, stateData.tenantId, stateData.redirectUrl);
+  return handleOAuthCallback(request, env, profile, stateData);
 }
 
 // ─── Apple Client Secret JWT ────────────────────────────────

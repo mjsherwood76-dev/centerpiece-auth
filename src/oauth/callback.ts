@@ -20,7 +20,7 @@
  */
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
-import type { OAuthUserProfile } from './base.js';
+import type { OAuthUserProfile, OAuthStateData } from './base.js';
 import { oauthErrorRedirect } from './base.js';
 import {
   generateRefreshToken,
@@ -38,16 +38,16 @@ import { validateRedirectUrl } from '../security/redirectValidator.js';
  * @param request - The original callback request (for IP/UA headers)
  * @param env - Worker environment bindings
  * @param profile - Extracted user profile from the OAuth provider
- * @param tenantId - Tenant ID from the stored OAuth state
- * @param redirectUrl - Return URL from the stored OAuth state
+ * @param stateData - Full OAuth state data including tenant, redirect, and client PKCE params
  */
 export async function handleOAuthCallback(
   request: Request,
   env: Env,
   profile: OAuthUserProfile,
-  tenantId: string,
-  redirectUrl: string
+  stateData: OAuthStateData
 ): Promise<Response> {
+  const tenantId = stateData.tenantId;
+  const redirectUrl = stateData.redirectUrl;
   const db = new AuthDB(env.AUTH_DB);
   await db.enableForeignKeys();
 
@@ -98,8 +98,8 @@ export async function handleOAuthCallback(
   const codeTtlSeconds = parseInt(env.AUTH_CODE_TTL_SECONDS || '60', 10);
   const codeExpiresAt = Math.floor(Date.now() / 1000) + codeTtlSeconds;
 
-  // ── Determine audience from redirect URL ──
-  const aud = resolveAudience(redirectUrl);
+  // ── Determine audience from state data or redirect URL ──
+  const aud = stateData.audience === 'admin' ? 'admin' : resolveAudience(redirectUrl);
 
   await db.insertAuthCode({
     code_hash: authCodeHash,
@@ -108,6 +108,8 @@ export async function handleOAuthCallback(
     redirect_origin: redirectValidation.origin,
     aud,
     expires_at: codeExpiresAt,
+    code_challenge: stateData.clientCodeChallenge ?? null,
+    code_challenge_method: stateData.clientCodeChallengeMethod ?? null,
   });
 
   // ── Redirect with code ──
@@ -226,7 +228,7 @@ async function resolveUser(db: AuthDB, profile: OAuthUserProfile): Promise<strin
 
 /** Admin domain patterns for audience determination. */
 const ADMIN_DOMAINS = [
-  'admin.centerpiecelab.com',
+  'hub.centerpiecelab.com',
   'centerpiece-admin-staging.pages.dev',
 ];
 

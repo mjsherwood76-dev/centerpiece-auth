@@ -22,15 +22,20 @@ import { renderAuthPage, oauthIcons, escapeHtml, escapeAttr } from './renderer.j
 export async function handleLoginPage(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const tenant = url.searchParams.get('tenant');
-  const redirect = url.searchParams.get('redirect') || '';
+  // Accept both 'redirect' (storefront) and 'redirect_uri' (admin SPA)
+  const redirect = url.searchParams.get('redirect') || url.searchParams.get('redirect_uri') || '';
   const error = url.searchParams.get('error');
   const message = url.searchParams.get('message');
+  // PKCE params from admin SPA — pass through to form/OAuth
+  const audience = url.searchParams.get('audience') || '';
+  const codeChallenge = url.searchParams.get('code_challenge') || '';
+  const codeChallengeMethod = url.searchParams.get('code_challenge_method') || '';
 
   const branding = await loadTenantBranding(tenant, env);
 
-  // Build OAuth URLs
+  // Build OAuth URLs — include PKCE params so they flow through the OAuth state
   const oauthBase = `${env.AUTH_DOMAIN}/oauth`;
-  const oauthParams = buildOAuthParams(tenant, redirect);
+  const oauthParams = buildOAuthParams(tenant, redirect, audience, codeChallenge, codeChallengeMethod);
 
   const body = `
     <h1 class="auth-card__title">Sign In</h1>
@@ -42,6 +47,9 @@ export async function handleLoginPage(request: Request, env: Env): Promise<Respo
     <form class="auth-form" method="POST" action="${escapeAttr(env.AUTH_DOMAIN)}/api/login" id="login-form">
       <input type="hidden" name="tenant" value="${escapeAttr(tenant || '')}">
       <input type="hidden" name="redirect" value="${escapeAttr(redirect)}">
+      ${audience ? `<input type="hidden" name="audience" value="${escapeAttr(audience)}">` : ''}
+      ${codeChallenge ? `<input type="hidden" name="code_challenge" value="${escapeAttr(codeChallenge)}">` : ''}
+      ${codeChallengeMethod ? `<input type="hidden" name="code_challenge_method" value="${escapeAttr(codeChallengeMethod)}">` : ''}
 
       <div class="form-group">
         <label class="form-label" for="email">Email</label>
@@ -85,7 +93,7 @@ export async function handleLoginPage(request: Request, env: Env): Promise<Respo
 
     <p class="auth-footer-link">
       Don't have an account?
-      <a class="auth-link" href="${escapeAttr(env.AUTH_DOMAIN)}/register?tenant=${encodeURIComponent(tenant || '')}&redirect=${encodeURIComponent(redirect)}">Sign up</a>
+      <a class="auth-link" href="${escapeAttr(env.AUTH_DOMAIN)}/register?tenant=${encodeURIComponent(tenant || '')}&redirect=${encodeURIComponent(redirect)}${audience ? '&audience=' + encodeURIComponent(audience) : ''}${codeChallenge ? '&code_challenge=' + encodeURIComponent(codeChallenge) : ''}${codeChallengeMethod ? '&code_challenge_method=' + encodeURIComponent(codeChallengeMethod) : ''}">Sign up</a>
     </p>
   `;
 
@@ -105,10 +113,19 @@ export async function handleLoginPage(request: Request, env: Env): Promise<Respo
 
 // ─── Helpers ────────────────────────────────────────────────
 
-function buildOAuthParams(tenant: string | null, redirect: string): string {
+function buildOAuthParams(
+  tenant: string | null,
+  redirect: string,
+  audience: string,
+  codeChallenge: string,
+  codeChallengeMethod: string
+): string {
   const params = new URLSearchParams();
   if (tenant) params.set('tenant', tenant);
   if (redirect) params.set('redirect', redirect);
+  if (audience) params.set('audience', audience);
+  if (codeChallenge) params.set('code_challenge', codeChallenge);
+  if (codeChallengeMethod) params.set('code_challenge_method', codeChallengeMethod);
   return params.toString();
 }
 
@@ -140,6 +157,8 @@ function getErrorMessage(code: string): string {
       return 'Your session has expired. Please sign in again.';
     case 'oauth_failed':
       return 'Authentication with the provider failed. Please try again.';
+    case 'oauth_not_configured':
+      return 'Social login is not available for this provider. Please use email and password instead.';
     case 'invalid_redirect':
       return 'The return URL is not valid. Please try again from the store.';
     default:

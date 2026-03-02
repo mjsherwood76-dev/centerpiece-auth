@@ -43,7 +43,7 @@ export async function handleGoogleOAuthInit(request: Request, env: Env): Promise
   const validation = await validateOAuthInitiation(request, env);
   if (validation instanceof Response) return validation;
 
-  const { tenantId, redirectUrl } = validation;
+  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience } = validation;
 
   // Create OAuth state with PKCE + nonce (Google supports OIDC)
   const { state, codeChallenge, nonce } = await createOAuthState(
@@ -51,7 +51,10 @@ export async function handleGoogleOAuthInit(request: Request, env: Env): Promise
     'google',
     tenantId,
     redirectUrl,
-    true // useNonce for OIDC
+    true, // useNonce for OIDC
+    clientCodeChallenge,
+    clientCodeChallengeMethod,
+    audience
   );
 
   // Build Google authorization URL
@@ -122,7 +125,7 @@ export async function handleGoogleOAuthCallback(request: Request, env: Env): Pro
   }
 
   // Delegate to shared callback handler
-  return handleOAuthCallback(request, env, profile, stateData.tenantId, stateData.redirectUrl);
+  return handleOAuthCallback(request, env, profile, stateData);
 }
 
 // ─── Token Exchange ─────────────────────────────────────────

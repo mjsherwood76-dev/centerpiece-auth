@@ -42,7 +42,7 @@ export async function handleFacebookOAuthInit(request: Request, env: Env): Promi
   const validation = await validateOAuthInitiation(request, env);
   if (validation instanceof Response) return validation;
 
-  const { tenantId, redirectUrl } = validation;
+  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience } = validation;
 
   // Create OAuth state (no nonce for Facebook — not OIDC)
   const { state } = await createOAuthState(
@@ -50,7 +50,10 @@ export async function handleFacebookOAuthInit(request: Request, env: Env): Promi
     'facebook',
     tenantId,
     redirectUrl,
-    false // no nonce — Facebook is not OIDC
+    false, // no nonce — Facebook is not OIDC
+    clientCodeChallenge,
+    clientCodeChallengeMethod,
+    audience
   );
 
   // Build Facebook authorization URL
@@ -114,7 +117,7 @@ export async function handleFacebookOAuthCallback(request: Request, env: Env): P
     return oauthErrorRedirect(env, stateData.tenantId, stateData.redirectUrl, 'oauth_failed');
   }
 
-  return handleOAuthCallback(request, env, profile, stateData.tenantId, stateData.redirectUrl);
+  return handleOAuthCallback(request, env, profile, stateData);
 }
 
 // ─── Token Exchange ─────────────────────────────────────────

@@ -465,11 +465,14 @@ export class AuthDB {
     nonce: string | null;
     provider: string;
     expires_at: number;
+    client_code_challenge?: string | null;
+    client_code_challenge_method?: 'S256' | null;
+    audience?: string | null;
   }): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO oauth_states (state, tenant_id, redirect_url, code_verifier, nonce, provider, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO oauth_states (state, tenant_id, redirect_url, code_verifier, nonce, provider, expires_at, client_code_challenge, client_code_challenge_method, audience)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         state.state,
@@ -478,7 +481,10 @@ export class AuthDB {
         state.code_verifier,
         state.nonce,
         state.provider,
-        state.expires_at
+        state.expires_at,
+        state.client_code_challenge ?? null,
+        state.client_code_challenge_method ?? null,
+        state.audience ?? null
       )
       .run();
   }
@@ -492,6 +498,9 @@ export class AuthDB {
     nonce: string | null;
     provider: string;
     expires_at: number;
+    client_code_challenge: string | null;
+    client_code_challenge_method: 'S256' | null;
+    audience: string | null;
   } | null> {
     const row = await this.db
       .prepare('SELECT * FROM oauth_states WHERE state = ?')
@@ -504,6 +513,9 @@ export class AuthDB {
         nonce: string | null;
         provider: string;
         expires_at: number;
+        client_code_challenge: string | null;
+        client_code_challenge_method: 'S256' | null;
+        audience: string | null;
       }>();
     if (!row) return null;
 

@@ -33,6 +33,11 @@ export interface OAuthStateData {
   codeVerifier: string;
   nonce: string | null;
   provider: OAuthProvider;
+  /** Admin SPA's PKCE code_challenge — stored through the OAuth round trip. */
+  clientCodeChallenge: string | null;
+  clientCodeChallengeMethod: 'S256' | null;
+  /** 'admin' | 'storefront' — audience from the initiating client. */
+  audience: string | null;
 }
 
 // ─── State TTL ──────────────────────────────────────────────
@@ -99,7 +104,10 @@ export async function createOAuthState(
   provider: OAuthProvider,
   tenantId: string,
   redirectUrl: string,
-  useNonce: boolean
+  useNonce: boolean,
+  clientCodeChallenge?: string | null,
+  clientCodeChallengeMethod?: 'S256' | null,
+  audience?: string | null
 ): Promise<{ state: string; codeVerifier: string; codeChallenge: string; nonce: string | null }> {
   const db = new AuthDB(env.AUTH_DB);
   await db.enableForeignKeys();
@@ -118,6 +126,9 @@ export async function createOAuthState(
     nonce,
     provider,
     expires_at: expiresAt,
+    client_code_challenge: clientCodeChallenge ?? null,
+    client_code_challenge_method: clientCodeChallengeMethod ?? null,
+    audience: audience ?? null,
   });
 
   return { state, codeVerifier, codeChallenge, nonce };
@@ -150,6 +161,9 @@ export async function consumeOAuthState(
     codeVerifier: row.code_verifier,
     nonce: row.nonce,
     provider: row.provider as OAuthProvider,
+    clientCodeChallenge: row.client_code_challenge ?? null,
+    clientCodeChallengeMethod: row.client_code_challenge_method ?? null,
+    audience: row.audience ?? null,
   };
 }
 
@@ -163,10 +177,13 @@ export async function consumeOAuthState(
 export async function validateOAuthInitiation(
   request: Request,
   env: Env
-): Promise<{ tenantId: string; redirectUrl: string } | Response> {
+): Promise<{ tenantId: string; redirectUrl: string; clientCodeChallenge: string | null; clientCodeChallengeMethod: 'S256' | null; audience: string | null } | Response> {
   const url = new URL(request.url);
   const tenant = url.searchParams.get('tenant') || '';
   const redirect = url.searchParams.get('redirect') || '';
+  const clientCodeChallenge = url.searchParams.get('code_challenge') || null;
+  const clientCodeChallengeMethod = (url.searchParams.get('code_challenge_method') || null) as 'S256' | null;
+  const audience = url.searchParams.get('audience') || null;
 
   if (!redirect) {
     return oauthErrorRedirect(env, tenant, '', 'invalid_redirect');
@@ -177,7 +194,7 @@ export async function validateOAuthInitiation(
     return oauthErrorRedirect(env, tenant, '', 'invalid_redirect');
   }
 
-  return { tenantId: validation.tenantId, redirectUrl: redirect };
+  return { tenantId: validation.tenantId, redirectUrl: redirect, clientCodeChallenge, clientCodeChallengeMethod, audience };
 }
 
 // ─── Error Helpers ──────────────────────────────────────────

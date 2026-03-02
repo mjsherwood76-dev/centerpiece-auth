@@ -21,14 +21,19 @@ import { renderAuthPage, oauthIcons, escapeHtml, escapeAttr } from './renderer.j
 export async function handleRegisterPage(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const tenant = url.searchParams.get('tenant');
-  const redirect = url.searchParams.get('redirect') || '';
+  // Accept both 'redirect' (storefront) and 'redirect_uri' (admin SPA)
+  const redirect = url.searchParams.get('redirect') || url.searchParams.get('redirect_uri') || '';
   const error = url.searchParams.get('error');
+  // PKCE params from admin SPA — pass through to form/OAuth
+  const audience = url.searchParams.get('audience') || '';
+  const codeChallenge = url.searchParams.get('code_challenge') || '';
+  const codeChallengeMethod = url.searchParams.get('code_challenge_method') || '';
 
   const branding = await loadTenantBranding(tenant, env);
 
   // Build OAuth URLs
   const oauthBase = `${env.AUTH_DOMAIN}/oauth`;
-  const oauthParams = buildOAuthParams(tenant, redirect);
+  const oauthParams = buildOAuthParams(tenant, redirect, audience, codeChallenge, codeChallengeMethod);
 
   const body = `
     <h1 class="auth-card__title">Create Account</h1>
@@ -39,6 +44,9 @@ export async function handleRegisterPage(request: Request, env: Env): Promise<Re
     <form class="auth-form" method="POST" action="${escapeAttr(env.AUTH_DOMAIN)}/api/register" id="register-form">
       <input type="hidden" name="tenant" value="${escapeAttr(tenant || '')}">
       <input type="hidden" name="redirect" value="${escapeAttr(redirect)}">
+      ${audience ? `<input type="hidden" name="audience" value="${escapeAttr(audience)}">` : ''}
+      ${codeChallenge ? `<input type="hidden" name="code_challenge" value="${escapeAttr(codeChallenge)}">` : ''}
+      ${codeChallengeMethod ? `<input type="hidden" name="code_challenge_method" value="${escapeAttr(codeChallengeMethod)}">` : ''}
 
       <div class="form-group">
         <label class="form-label" for="name">Name</label>
@@ -88,7 +96,7 @@ export async function handleRegisterPage(request: Request, env: Env): Promise<Re
 
     <p class="auth-footer-link">
       Already have an account?
-      <a class="auth-link" href="${escapeAttr(env.AUTH_DOMAIN)}/login?tenant=${encodeURIComponent(tenant || '')}&redirect=${encodeURIComponent(redirect)}">Sign in</a>
+      <a class="auth-link" href="${escapeAttr(env.AUTH_DOMAIN)}/login?tenant=${encodeURIComponent(tenant || '')}&redirect=${encodeURIComponent(redirect)}${audience ? '&audience=' + encodeURIComponent(audience) : ''}${codeChallenge ? '&code_challenge=' + encodeURIComponent(codeChallenge) : ''}${codeChallengeMethod ? '&code_challenge_method=' + encodeURIComponent(codeChallengeMethod) : ''}">Sign in</a>
     </p>
   `;
 
@@ -140,10 +148,19 @@ export async function handleRegisterPage(request: Request, env: Env): Promise<Re
 
 // ─── Helpers ────────────────────────────────────────────────
 
-function buildOAuthParams(tenant: string | null, redirect: string): string {
+function buildOAuthParams(
+  tenant: string | null,
+  redirect: string,
+  audience: string,
+  codeChallenge: string,
+  codeChallengeMethod: string
+): string {
   const params = new URLSearchParams();
   if (tenant) params.set('tenant', tenant);
   if (redirect) params.set('redirect', redirect);
+  if (audience) params.set('audience', audience);
+  if (codeChallenge) params.set('code_challenge', codeChallenge);
+  if (codeChallengeMethod) params.set('code_challenge_method', codeChallengeMethod);
   return params.toString();
 }
 
@@ -164,6 +181,8 @@ function getErrorMessage(code: string): string {
       return 'The return URL is not valid. Please try again from the store.';
     case 'oauth_failed':
       return 'Authentication with the provider failed. Please try again.';
+    case 'oauth_not_configured':
+      return 'Social login is not available for this provider. Please use email and password instead.';
     default:
       return 'An error occurred. Please try again.';
   }

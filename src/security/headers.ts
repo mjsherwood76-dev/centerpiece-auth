@@ -30,8 +30,23 @@ const DEV_ORIGINS = ['http://localhost', 'http://127.0.0.1'];
  * Creates a new Response with the security headers appended.
  * Optionally merges trace headers (x-trace-id, Server-Timing).
  */
-export function addSecurityHeaders(response: Response, traceHeaders?: Record<string, string>): Response {
+export function addSecurityHeaders(
+  response: Response,
+  traceHeaders?: Record<string, string>,
+  request?: Request,
+  env?: Env
+): Response {
   const headers = new Headers(response.headers);
+
+  // ── CORS response headers for cross-origin requests ──
+  if (request && env) {
+    const origin = request.headers.get('Origin') || '';
+    if (origin && isAllowedOrigin(origin, env)) {
+      headers.set('Access-Control-Allow-Origin', origin);
+      headers.set('Access-Control-Allow-Credentials', 'true');
+      headers.set('Vary', 'Origin');
+    }
+  }
 
   // Prevent clickjacking
   if (!headers.has('X-Frame-Options')) {

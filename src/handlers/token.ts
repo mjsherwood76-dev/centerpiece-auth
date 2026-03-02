@@ -3,13 +3,19 @@
  *
  * POST /api/token — Exchange authorization code for JWT access token
  *
- * This is a **server-to-server** endpoint (runtime Worker → auth Worker).
- * No CORS headers needed.
+ * Supports two callers:
+ *
+ * 1. **Server-to-server** (runtime Worker → auth Worker):
+ *    Body: `{ code, tenant_id, redirect_origin, code_verifier? }`
+ *
+ * 2. **Admin SPA** (browser → auth Worker, with PKCE):
+ *    Body: `{ grant_type: "authorization_code", code, redirect_uri, code_verifier }`
+ *    - `tenant_id` and `redirect_origin` are derived from the stored auth code row
  *
  * Flow:
- * 1. Accept `{ code, tenant_id, redirect_origin, code_verifier? }`
+ * 1. Accept and normalize input fields
  * 2. Hash the code, look up in `auth_codes` table
- * 3. Verify: not expired, tenant_id matches, redirect_origin matches
+ * 3. Verify: not expired, redirect_origin matches
  * 4. If auth code has `code_challenge`: verify PKCE (SHA256(code_verifier) === code_challenge)
  * 5. Delete row immediately (single-use enforcement)
  * 6. Look up user details
@@ -20,7 +26,7 @@
  * - Code stored as SHA-256 hash — plaintext never in DB
  * - Single-use: deleted on consumption
  * - redirect_origin must match (prevents code interception)
- * - tenant_id must match (prevents cross-tenant code use)
+ * - tenant_id verified from DB row (admin SPA) or from caller (runtime)
  * - PKCE enforced for admin flows (code_challenge stored with auth code)
  */
 import type { Env } from '../types.js';
@@ -30,7 +36,10 @@ import { signJwt, sha256Hex } from '../crypto/jwt.js';
 /**
  * Handle POST /api/token
  *
- * Accepts JSON body: { code, tenant_id, redirect_origin, code_verifier? }
+ * Accepts JSON body:
+ *   Runtime:  { code, tenant_id, redirect_origin, code_verifier? }
+ *   Admin:    { grant_type: "authorization_code", code, redirect_uri, code_verifier }
+ *
  * Returns JSON: { access_token, token_type, expires_in }
  */
 export async function handleTokenExchange(request: Request, env: Env): Promise<Response> {
@@ -46,15 +55,30 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
   try {
     const body = await request.json() as Record<string, string>;
     code = (body.code || '').trim();
-    tenantId = (body.tenant_id || '').trim();
-    redirectOrigin = (body.redirect_origin || '').trim();
     codeVerifier = body.code_verifier ? body.code_verifier.trim() : undefined;
+
+    // Support two field naming conventions:
+    // 1. Runtime (server-to-server): tenant_id + redirect_origin
+    // 2. Admin SPA (browser): redirect_uri (tenant_id derived from auth code row)
+    tenantId = (body.tenant_id || '').trim();
+    if (body.redirect_origin) {
+      redirectOrigin = body.redirect_origin.trim();
+    } else if (body.redirect_uri) {
+      // Admin SPA sends redirect_uri — extract origin from it
+      try {
+        redirectOrigin = new URL(body.redirect_uri.trim()).origin;
+      } catch {
+        return jsonError('Invalid redirect_uri', 400);
+      }
+    } else {
+      redirectOrigin = '';
+    }
   } catch {
     return jsonError('Invalid request body', 400);
   }
 
-  if (!code || !tenantId || !redirectOrigin) {
-    return jsonError('Missing required fields: code, tenant_id, redirect_origin', 400);
+  if (!code || !redirectOrigin) {
+    return jsonError('Missing required fields: code, redirect_origin (or redirect_uri)', 400);
   }
 
   // ── Hash the code and look up ──
@@ -71,12 +95,17 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
     return jsonError('Authorization code has expired', 400);
   }
 
-  // ── Verify tenant_id matches ──
-  if (authCodeRow.tenant_id !== tenantId) {
-    console.error(
-      `Token exchange tenant mismatch: expected=${authCodeRow.tenant_id}, got=${tenantId}`
-    );
-    return jsonError('Authorization code tenant mismatch', 400);
+  // ── Verify tenant_id if provided (runtime flow), else use from auth code row ──
+  if (tenantId) {
+    if (authCodeRow.tenant_id !== tenantId) {
+      console.error(
+        `Token exchange tenant mismatch: expected=${authCodeRow.tenant_id}, got=${tenantId}`
+      );
+      return jsonError('Authorization code tenant mismatch', 400);
+    }
+  } else {
+    // Admin SPA flow — tenant_id comes from the auth code row
+    tenantId = authCodeRow.tenant_id;
   }
 
   // ── Verify redirect_origin matches ──
@@ -122,11 +151,25 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
   if (authCodeRow.aud === 'admin') {
     const memberships = await db.getAdminMemberships(user.id);
 
-    const primaryTenantId = memberships[0]?.tenant_id ?? null;
-    // Scope roles to the primary tenant only (not a global flat list)
-    const roles = memberships
-      .filter(m => m.tenant_id === primaryTenantId)
-      .map(m => m.role);
+    // Check for platform_admin on __platform__ tenant (super admin)
+    const isPlatformAdmin = memberships.some(
+      m => m.tenant_id === '__platform__' && m.role === 'platform_admin'
+    );
+
+    let primaryTenantId: string | null;
+    let roles: string[];
+
+    if (isPlatformAdmin) {
+      // Super admin: gets platform_admin role, can switch tenants via API
+      primaryTenantId = '__platform__';
+      roles = ['platform_admin'];
+    } else {
+      primaryTenantId = memberships[0]?.tenant_id ?? null;
+      // Scope roles to the primary tenant only (not a global flat list)
+      roles = memberships
+        .filter(m => m.tenant_id === primaryTenantId)
+        .map(m => m.role);
+    }
 
     jwtPayload.jti = crypto.randomUUID();
     jwtPayload.roles = roles;

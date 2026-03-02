@@ -186,7 +186,7 @@ function redirectToLogin(
 
 /** Admin domain patterns for audience determination. */
 const ADMIN_DOMAINS = [
-  'admin.centerpiecelab.com',
+  'hub.centerpiecelab.com',
   'centerpiece-admin-staging.pages.dev',
 ];
 

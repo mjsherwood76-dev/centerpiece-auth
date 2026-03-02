@@ -53,7 +53,7 @@ export async function handleMicrosoftOAuthInit(request: Request, env: Env): Prom
   const validation = await validateOAuthInitiation(request, env);
   if (validation instanceof Response) return validation;
 
-  const { tenantId, redirectUrl } = validation;
+  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience } = validation;
 
   // Create OAuth state with PKCE + nonce (Microsoft supports OIDC)
   const { state, codeChallenge, nonce } = await createOAuthState(
@@ -61,7 +61,10 @@ export async function handleMicrosoftOAuthInit(request: Request, env: Env): Prom
     'microsoft',
     tenantId,
     redirectUrl,
-    true // useNonce for OIDC
+    true, // useNonce for OIDC
+    clientCodeChallenge,
+    clientCodeChallengeMethod,
+    audience
   );
 
   // Build Microsoft authorization URL
@@ -141,7 +144,7 @@ export async function handleMicrosoftOAuthCallback(
     return oauthErrorRedirect(env, stateData.tenantId, stateData.redirectUrl, 'oauth_failed');
   }
 
-  return handleOAuthCallback(request, env, profile, stateData.tenantId, stateData.redirectUrl);
+  return handleOAuthCallback(request, env, profile, stateData);
 }
 
 // ─── Token Exchange ─────────────────────────────────────────

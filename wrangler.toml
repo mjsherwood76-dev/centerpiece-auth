@@ -77,7 +77,9 @@ id = "ff8cb7cba7a14257951a894940c77fea"
 binding = "TENANT_CONFIGS"
 id = "ee5142299d73451bbf76481b8b4d0c60"
 
-# Custom domain route (uncomment when DNS is configured)
-# [[routes]]
-# pattern = "auth.centerpiecelab.com/*"
-# zone_name = "centerpiecelab.com"
+# Custom domain route — auth.centerpiecelab.com
+# Routes all auth traffic for the platform domain to this Worker.
+# Note: A DNS record for auth.centerpiecelab.com must exist (CNAME/A, proxied).
+[[routes]]
+pattern = "auth.centerpiecelab.com/*"
+zone_name = "centerpiecelab.com"
