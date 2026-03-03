@@ -33,6 +33,7 @@ import { handleResetPassword } from './handlers/resetPassword.js';
 import { handleResetPasswordPage } from './pages/resetPassword.js';
 import { handleMemberships } from './handlers/memberships.js';
 import { handleInternalMemberships } from './handlers/internalMemberships.js';
+import { handleCustomerRoutes } from './handlers/customers.js';
 import { checkRateLimit } from './security/rateLimit.js';
 import { addSecurityHeaders, handleCorsPreflightValidated } from './security/headers.js';
 import { logAuthEvent } from './security/auditLog.js';
@@ -211,6 +212,14 @@ export default {
       if (method === 'GET' && path === '/api/memberships') {
         response = await handleMemberships(request, env);
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      // --- Admin Customer API (Phase 3.1, Session 15) ---
+      if (method === 'GET' && path.startsWith('/api/admin/customers')) {
+        response = await handleCustomerRoutes(request, env);
+        if (response) {
+          return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+        }
       }
 
       // --- Internal API (service-to-service, not user-facing) ---

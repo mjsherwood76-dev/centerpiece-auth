@@ -559,4 +559,32 @@ export class AuthDB {
       .run();
     return result.meta.changes ?? 0;
   }
+
+  // ─── Generic Query Helpers ──────────────────────────────
+
+  /**
+   * Execute a raw SQL query and return the first result row.
+   * Uses prepared statements to prevent SQL injection.
+   */
+  async raw<T>(sql: string, params: unknown[]): Promise<T | null> {
+    let stmt = this.db.prepare(sql);
+    if (params.length > 0) {
+      stmt = stmt.bind(...params);
+    }
+    const result = await stmt.first<T>();
+    return result ?? null;
+  }
+
+  /**
+   * Execute a raw SQL query and return all result rows.
+   * Uses prepared statements to prevent SQL injection.
+   */
+  async rawAll<T>(sql: string, params: unknown[]): Promise<T[]> {
+    let stmt = this.db.prepare(sql);
+    if (params.length > 0) {
+      stmt = stmt.bind(...params);
+    }
+    const result = await stmt.all<T>();
+    return result.results;
+  }
 }
