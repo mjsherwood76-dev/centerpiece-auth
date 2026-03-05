@@ -160,9 +160,23 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
     let roles: string[];
 
     if (isPlatformAdmin) {
-      // Super admin: gets platform_admin role, can switch tenants via API
-      primaryTenantId = '__platform__';
+      // Super admin: gets platform_admin role, can switch tenants via API.
+      // Default primaryTenantId to first real tenant (not __platform__)
+      // so the admin SPA can load tenant config without a tenant selector.
+      const realTenant = memberships.find(
+        m => m.tenant_id !== '__platform__' && m.tenant_id !== '__unknown__'
+      );
+      primaryTenantId = realTenant?.tenant_id ?? '__platform__';
+      // Include platform_admin + any roles from the primary tenant
       roles = ['platform_admin'];
+      if (realTenant) {
+        const tenantRoles = memberships
+          .filter(m => m.tenant_id === realTenant.tenant_id)
+          .map(m => m.role);
+        for (const r of tenantRoles) {
+          if (!roles.includes(r)) roles.push(r);
+        }
+      }
     } else {
       primaryTenantId = memberships[0]?.tenant_id ?? null;
       // Scope roles to the primary tenant only (not a global flat list)
