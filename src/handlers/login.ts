@@ -221,6 +221,7 @@ function errorRedirect(env: Env, tenant: string, redirect: string, error: string
 /** Admin domain patterns for audience determination. */
 const ADMIN_DOMAINS = [
   'hub.centerpiecelab.com',
+  'staging.centerpiecelab.com',
   'centerpiece-admin-staging.pages.dev',
 ];
 

@@ -64,12 +64,15 @@ command = "npm run build"
 [env.staging]
 name = "centerpiece-auth-staging"
 workers_dev = true
-vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://auth.centerpiecelab.com", EMAIL_FROM = "noreply@centerpiecelab.com", EMAIL_FROM_NAME = "Centerpiece Lab", ACCESS_TOKEN_TTL_SECONDS = "900", REFRESH_TOKEN_TTL_DAYS = "30", AUTH_CODE_TTL_SECONDS = "60" }
+# Override top-level routes so staging does NOT claim auth.centerpiecelab.com
+# (production-only route). Staging uses *.workers.dev via workers_dev = true.
+routes = []
+vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://centerpiece-auth-staging.mjsherwood76.workers.dev", EMAIL_FROM = "noreply@centerpiecelab.com", EMAIL_FROM_NAME = "Centerpiece Lab", ACCESS_TOKEN_TTL_SECONDS = "900", REFRESH_TOKEN_TTL_DAYS = "30", AUTH_CODE_TTL_SECONDS = "60" }
 
 [[env.staging.d1_databases]]
 binding = "AUTH_DB"
-database_name = "centerpiece-auth-db"
-database_id = "26717b6e-c8a2-430e-83ed-8664192c662e"
+database_name = "centerpiece-auth-db-staging"
+database_id = "4b06dd01-13a0-4fd1-a68f-167a4d73a6a3"
 
 [[env.staging.kv_namespaces]]
 binding = "CANONICAL_INPUTS"

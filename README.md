@@ -2,8 +2,8 @@
 
 Centralized identity provider for the Centerpiece platform.
 
-Cloudflare Worker deployed at `auth.centerpiecelab.com` handling authentication,
-JWT issuance, and tenant-scoped authorization.
+Cloudflare Worker handling authentication, JWT issuance, and tenant-scoped authorization.
+Production: `auth.centerpiecelab.com`. Staging: `centerpiece-auth-staging.mjsherwood76.workers.dev`.
 
 ## Quick Start
 

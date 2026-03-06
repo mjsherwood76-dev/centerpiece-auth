@@ -8,16 +8,17 @@
 ## Overview
 
 `centerpiece-auth` is a Cloudflare Worker that serves as the centralized identity
-provider for the Centerpiece platform. It is deployed at `auth.centerpiecelab.com`
-and handles all authentication and authorization concerns.
+provider for the Centerpiece platform. It is deployed at `auth.centerpiecelab.com` (production)
+and `centerpiece-auth-staging.mjsherwood76.workers.dev` (staging), handling all
+authentication and authorization concerns.
 
 ### Core Properties
 
 | Property | Value |
 |----------|-------|
 | **Deployment** | Cloudflare Worker |
-| **Domain** | `auth.centerpiecelab.com` (prod) |
-| **Database** | Cloudflare D1 (SQLite) |
+| **Domain** | `auth.centerpiecelab.com` (prod), `centerpiece-auth-staging.mjsherwood76.workers.dev` (staging) |
+| **Database** | Cloudflare D1 (SQLite) — Production: `centerpiece-auth-db`, Staging: `centerpiece-auth-db-staging` (separate databases) |
 | **JWT Algorithm** | ES256 (ECDSA P-256) |
 | **Token Model** | Short-lived JWT + HttpOnly refresh cookie |
 | **Identity Model** | Platform-wide users + tenant-scoped memberships |
@@ -59,7 +60,8 @@ and handles all authentication and authorization concerns.
                                    ▼
                         ┌──────────────────────────┐
                         │   Auth Worker            │
-                        │  (auth.centerpiecelab.com)│
+                        │  (prod: auth.centerpiecelab.com)│
+                        │  (staging: ...workers.dev)│
                         │                          │
                         │  Login / Register / OAuth │
                         └──────────┬───────────────┘
@@ -264,7 +266,7 @@ do not support PKCE but we store verifiers for consistency.
 
 | Input | Source | Mechanism | Description |
 |-------|--------|-----------|-------------|
-| HTTP requests | Browsers, `centerpiece-site-runtime` | HTTPS to `auth.centerpiecelab.com` | Login, register, OAuth, token exchange, refresh, password reset |
+| HTTP requests | Browsers, `centerpiece-site-runtime` | HTTPS to auth domain (prod: `auth.centerpiecelab.com`, staging: staging worker URL) | Login, register, OAuth, token exchange, refresh, password reset |
 | `CANONICAL_INPUTS` KV | Shared KV namespace (uploaded by `centerpiece-dev`) | KV read (read-only) | Theme tokens (brands, styles) for tenant-branded login pages |
 | `TENANT_CONFIGS` KV | Shared KV namespace | KV read (read-only) | Tenant configuration for domain validation and branding |
 | D1 database (`AUTH_DB`) | Cloudflare D1 | SQL queries | Users, memberships, OAuth accounts, tokens, auth codes, password resets |

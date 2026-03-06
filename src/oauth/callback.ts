@@ -229,6 +229,7 @@ async function resolveUser(db: AuthDB, profile: OAuthUserProfile): Promise<strin
 /** Admin domain patterns for audience determination. */
 const ADMIN_DOMAINS = [
   'hub.centerpiecelab.com',
+  'staging.centerpiecelab.com',
   'centerpiece-admin-staging.pages.dev',
 ];
 

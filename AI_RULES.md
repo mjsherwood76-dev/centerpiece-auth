@@ -8,7 +8,7 @@
 ## Repository Purpose
 
 `centerpiece-auth` is the **centralized identity provider** for the Centerpiece platform.
-It is a standalone Cloudflare Worker deployed on `auth.centerpiecelab.com` that handles:
+It is a standalone Cloudflare Worker (production: `auth.centerpiecelab.com`, staging: `centerpiece-auth-staging.mjsherwood76.workers.dev`) that handles:
 
 - Email/password registration and login
 - OAuth via Google, Facebook, Apple, Microsoft
