@@ -29,6 +29,7 @@ import {
   buildClearRefreshCookieHeader,
 } from '../crypto/refreshTokens.js';
 import { validateRedirectUrl } from '../security/redirectValidator.js';
+import { isAdminDomain } from '../security/platformDomains.js';
 
 /**
  * Handle GET /api/refresh
@@ -184,13 +185,6 @@ function redirectToLogin(
   });
 }
 
-/** Admin domain patterns for audience determination. */
-const ADMIN_DOMAINS = [
-  'hub.centerpiecelab.com',
-  'staging.centerpiecelab.com',
-  'centerpiece-admin-staging.pages.dev',
-];
-
 /**
  * Determine whether the auth flow is for the admin SPA or the storefront.
  */
@@ -201,7 +195,7 @@ function resolveAudience(
   if (audienceParam === 'admin') return 'admin';
   try {
     const hostname = new URL(redirectUrl).hostname;
-    if (ADMIN_DOMAINS.includes(hostname)) return 'admin';
+    if (isAdminDomain(hostname)) return 'admin';
   } catch {
     // Invalid URL — fall through to storefront
   }

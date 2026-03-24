@@ -11,16 +11,7 @@
  * Also provides a proper CORS preflight handler with origin validation.
  */
 import type { Env } from '../types.js';
-
-/** Controlled domain suffixes for CORS origin validation. */
-const CONTROLLED_SUFFIXES = [
-  '.centerpiece.shop',
-  '.centerpiece.app',
-  '.centerpiece.io',
-  '.workers.dev',
-  '.pages.dev',
-  '.centerpiecelab.com',
-];
+import { CONTROLLED_SUFFIXES } from './platformDomains.js';
 
 /** Dev-only allowed origins. */
 const DEV_ORIGINS = ['http://localhost', 'http://127.0.0.1'];

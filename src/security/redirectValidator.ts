@@ -13,15 +13,7 @@
  * - Store redirect_origin with the auth code and enforce match at exchange time.
  */
 
-/** Controlled domain suffixes that are always accepted. */
-const CONTROLLED_SUFFIXES = [
-  '.centerpiece.shop',
-  '.centerpiece.app',
-  '.centerpiece.io',
-  '.centerpiecelab.com',
-  '.workers.dev',
-  '.pages.dev',
-];
+import { CONTROLLED_SUFFIXES } from './platformDomains.js';
 
 /** Dev-only allowed origins (http localhost). */
 const DEV_HOSTS = ['localhost', '127.0.0.1'];
