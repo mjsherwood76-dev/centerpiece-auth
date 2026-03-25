@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { postForm, postJson, uniqueEmail, VALID_REDIRECT, getLocationParam, registerUser } from './helpers.js';
 
 /** Admin redirect URL — points to admin staging domain. */
-const ADMIN_REDIRECT = 'https://centerpiece-admin-staging.pages.dev/dashboard';
+const ADMIN_REDIRECT = 'https://centerpiece-platform-ui-staging.pages.dev/dashboard';
 
 describe('Admin JWT Claims (Phase 2.3)', () => {
   describe('storefront tokens (backward compatibility)', () => {
