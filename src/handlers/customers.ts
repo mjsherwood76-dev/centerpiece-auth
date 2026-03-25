@@ -1,8 +1,8 @@
 /**
  * Customer Query Endpoints — Auth Worker
  *
- * GET /api/admin/customers       → Paginated, tenant-scoped customer list
- * GET /api/admin/customers/:id   → Single customer detail
+ * GET /api/platform/customers       → Paginated, tenant-scoped customer list
+ * GET /api/platform/customers/:id   → Single customer detail
  *
  * Auth: Bearer JWT with aud='admin' and roles including 'seller' or 'platform_admin'.
  * Tenant scoping: Uses JWT primaryTenantId (authoritative). Falls back to
@@ -138,13 +138,13 @@ export async function handleCustomerRoutes(
   const path = url.pathname;
   const method = request.method;
 
-  // GET /api/admin/customers — customer list
-  if (path === '/api/admin/customers' && method === 'GET') {
+  // GET /api/platform/customers — customer list
+  if (path === '/api/platform/customers' && method === 'GET') {
     return handleCustomerList(request, env);
   }
 
-  // GET /api/admin/customers/:id — customer detail
-  const detailMatch = path.match(/^\/api\/admin\/customers\/([^/]+)$/);
+  // GET /api/platform/customers/:id — customer detail
+  const detailMatch = path.match(/^\/api\/platform\/customers\/([^/]+)$/);
   if (detailMatch && method === 'GET') {
     return handleCustomerDetail(request, env, detailMatch[1]);
   }
@@ -155,7 +155,7 @@ export async function handleCustomerRoutes(
 // ─── Customer List ──────────────────────────────────────────
 
 /**
- * GET /api/admin/customers
+ * GET /api/platform/customers
  *
  * Query params:
  *   page   — Page number (default: 1, min: 1)
@@ -229,7 +229,7 @@ async function handleCustomerList(
 // ─── Customer Detail ────────────────────────────────────────
 
 /**
- * GET /api/admin/customers/:id
+ * GET /api/platform/customers/:id
  *
  * Returns single customer profile scoped to the tenant.
  * Only returns data if the user has a 'customer' membership in this tenant.

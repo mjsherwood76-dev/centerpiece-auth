@@ -214,8 +214,8 @@ export default {
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
-      // --- Admin Customer API (Phase 3.1, Session 15) ---
-      if (method === 'GET' && path.startsWith('/api/admin/customers')) {
+      // --- Platform Customer API (Phase 3.1, Session 15) ---
+      if (method === 'GET' && path.startsWith('/api/platform/customers')) {
         const customerResponse = await handleCustomerRoutes(request, env);
         if (customerResponse) {
           return addSecurityHeaders(customerResponse, trace.getResponseHeaders(), request, env);

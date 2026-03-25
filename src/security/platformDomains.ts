@@ -5,7 +5,7 @@
 export const ADMIN_DOMAINS: readonly string[] = [
   'hub.centerpiecelab.com',
   'staging.centerpiecelab.com',
-  'centerpiece-admin-staging.pages.dev',
+  'centerpiece-platform-ui-staging.pages.dev',
 ];
 
 /**
