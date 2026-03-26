@@ -33,6 +33,7 @@ import { handleResetPassword } from './handlers/resetPassword.js';
 import { handleResetPasswordPage } from './pages/resetPassword.js';
 import { handleMemberships } from './handlers/memberships.js';
 import { handleInternalMemberships } from './handlers/internalMemberships.js';
+import { handleInternalUserLookup } from './handlers/internalUsers.js';
 import { handleCustomerRoutes } from './handlers/customers.js';
 import { checkRateLimit } from './security/rateLimit.js';
 import { addSecurityHeaders, handleCorsPreflightValidated } from './security/headers.js';
@@ -223,10 +224,23 @@ export default {
       }
 
       // --- Internal API (service-to-service, not user-facing) ---
-      if (method === 'POST' && path === '/api/internal/memberships') {
+      if (path.startsWith('/api/internal/memberships')) {
         response = await handleInternalMemberships(request, env);
         logAuthEvent(logger, {
-          event: 'internal_membership_create',
+          event: `internal_membership_${method.toLowerCase()}`,
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          statusCode: response.status,
+          correlationId,
+        });
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      if (method === 'GET' && path === '/api/internal/users/by-email') {
+        response = await handleInternalUserLookup(request, env);
+        logAuthEvent(logger, {
+          event: 'internal_user_lookup',
           ip: clientIp,
           route: path,
           userAgent: request.headers.get('User-Agent'),

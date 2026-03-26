@@ -25,7 +25,7 @@ export interface TenantMembershipRow {
   id: string;
   user_id: string;
   tenant_id: string;
-  role: 'customer' | 'seller' | 'supplier' | 'platform_admin';
+  role: 'customer' | 'seller' | 'supplier' | 'owner' | 'platform_admin';
   status: 'active' | 'suspended' | 'invited';
   created_at: string;
 }
@@ -206,7 +206,7 @@ export class AuthDB {
     membershipId: string,
     userId: string,
     tenantId: string,
-    role: 'seller' | 'supplier',
+    role: 'seller' | 'supplier' | 'owner',
   ): Promise<void> {
     await this.db
       .prepare(
@@ -233,6 +233,96 @@ export class AuthDB {
       .bind(userId)
       .all<TenantMembershipRow>();
     return result.results;
+  }
+
+  /**
+   * Get the active owner membership for a tenant.
+   */
+  async getOwnerMembership(tenantId: string): Promise<TenantMembershipRow | null> {
+    const result = await this.db
+      .prepare(
+        `SELECT * FROM tenant_memberships
+         WHERE tenant_id = ? AND role = 'owner' AND status = 'active'
+         LIMIT 1`
+      )
+      .bind(tenantId)
+      .first<TenantMembershipRow>();
+    return result ?? null;
+  }
+
+  /**
+   * Delete a specific membership by user, tenant, and role.
+   */
+  async deleteMembership(userId: string, tenantId: string, role: string): Promise<void> {
+    await this.db
+      .prepare(
+        `DELETE FROM tenant_memberships WHERE user_id = ? AND tenant_id = ? AND role = ?`
+      )
+      .bind(userId, tenantId, role)
+      .run();
+  }
+
+  /**
+   * Get all non-customer memberships for a tenant, joined with user data.
+   * Used by GET /api/internal/memberships/by-tenant endpoint.
+   */
+  async getMembershipsByTenant(
+    tenantId: string
+  ): Promise<Array<{
+    id: string;
+    user_id: string;
+    email: string;
+    name: string;
+    role: string;
+    status: string;
+    created_at: string;
+  }>> {
+    const result = await this.db
+      .prepare(
+        `SELECT tm.id, tm.user_id, u.email, u.name, tm.role, tm.status, tm.created_at
+         FROM tenant_memberships tm
+         JOIN users u ON tm.user_id = u.id
+         WHERE tm.tenant_id = ? AND tm.role != 'customer'
+         ORDER BY tm.created_at ASC`
+      )
+      .bind(tenantId)
+      .all<{
+        id: string;
+        user_id: string;
+        email: string;
+        name: string;
+        role: string;
+        status: string;
+        created_at: string;
+      }>();
+    return result.results;
+  }
+
+  /**
+   * Look up a user by email address.
+   * Used by GET /api/internal/users/by-email endpoint.
+   */
+  async getUserByEmailPublic(email: string): Promise<{ id: string; email: string; name: string } | null> {
+    const result = await this.db
+      .prepare('SELECT id, email, name FROM users WHERE email = ? LIMIT 1')
+      .bind(email.toLowerCase())
+      .first<{ id: string; email: string; name: string }>();
+    return result ?? null;
+  }
+
+  /**
+   * Count active owner memberships for a user.
+   * Used to enforce the 5-tenant-per-user limit.
+   */
+  async countOwnerMemberships(userId: string): Promise<number> {
+    const result = await this.db
+      .prepare(
+        `SELECT COUNT(*) as count FROM tenant_memberships
+         WHERE user_id = ? AND role = 'owner' AND status = 'active'`
+      )
+      .bind(userId)
+      .first<{ count: number }>();
+    return result?.count ?? 0;
   }
 
   // ─── OAuth Accounts ─────────────────────────────────────

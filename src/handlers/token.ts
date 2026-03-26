@@ -163,9 +163,11 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
       // Super admin: gets platform_admin role, can switch tenants via API.
       // Default primaryTenantId to first real tenant (not __platform__)
       // so the admin SPA can load tenant config without a tenant selector.
-      const realTenant = memberships.find(
+      // Prefer owner membership over seller when choosing primary tenant.
+      const realTenants = memberships.filter(
         m => m.tenant_id !== '__platform__' && m.tenant_id !== '__unknown__'
       );
+      const realTenant = realTenants.find(m => m.role === 'owner') ?? realTenants[0];
       primaryTenantId = realTenant?.tenant_id ?? '__platform__';
       // Include platform_admin + any roles from the primary tenant
       roles = ['platform_admin'];
@@ -178,11 +180,18 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
         }
       }
     } else {
-      primaryTenantId = memberships[0]?.tenant_id ?? null;
+      // Prefer owner membership over seller when choosing primary tenant
+      const ownerMembership = memberships.find(m => m.role === 'owner');
+      primaryTenantId = ownerMembership?.tenant_id ?? memberships[0]?.tenant_id ?? null;
       // Scope roles to the primary tenant only (not a global flat list)
       roles = memberships
         .filter(m => m.tenant_id === primaryTenantId)
         .map(m => m.role);
+    }
+
+    // Owner implies seller — ensure seller is always present when owner is
+    if (roles.includes('owner') && !roles.includes('seller')) {
+      roles.push('seller');
     }
 
     jwtPayload.jti = crypto.randomUUID();

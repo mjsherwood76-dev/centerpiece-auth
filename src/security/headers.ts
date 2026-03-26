@@ -69,8 +69,11 @@ export function addSecurityHeaders(
           "font-src 'self' https://fonts.gstatic.com",
           // Allow images from any https source (tenant logos, avatars)
           "img-src 'self' https: data:",
-          // Form actions only to self (auth domain)
-          "form-action 'self'",
+          // Form actions to self + controlled platform domains.
+          // CSP Level 3 checks redirect destinations after form POST,
+          // so form-action must include origins the server redirects to
+          // (e.g. admin panel callback after login).
+          `form-action 'self' ${CONTROLLED_SUFFIXES.map(s => `https://*${s}`).join(' ')}`,
           // Block embedding in frames
           "frame-ancestors 'none'",
           // Base URI restriction
