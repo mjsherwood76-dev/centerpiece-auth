@@ -4,7 +4,7 @@
  * GET /api/platform/customers       → Paginated, tenant-scoped customer list
  * GET /api/platform/customers/:id   → Single customer detail
  *
- * Auth: Bearer JWT with aud='admin' and roles including 'seller' or 'platform_admin'.
+ * Auth: Bearer JWT with aud='admin' and contexts including 'seller' or 'platform'.
  * Tenant scoping: Uses JWT primaryTenantId (authoritative). Falls back to
  * X-CP-Tenant-Id header for service-binding calls where admin-api has already
  * verified the JWT and resolved the tenant.
@@ -81,7 +81,7 @@ interface AuthFailure {
 
 /**
  * Verify JWT and extract admin context.
- * Requires aud='admin' and roles including 'seller' or 'platform_admin'.
+ * Requires aud='admin' and contexts including 'seller' or 'platform'.
  */
 async function verifyAdminAuth(
   request: Request,
@@ -104,11 +104,12 @@ async function verifyAdminAuth(
     return { ok: false, response: jsonError('Token audience must be admin', 403) };
   }
 
-  // Must have seller or platform_admin role
-  const roles = payload.roles || [];
-  const hasAdminRole = roles.includes('seller') || roles.includes('platform_admin');
-  if (!hasAdminRole) {
-    return { ok: false, response: jsonError('Insufficient role: requires seller or platform_admin', 403) };
+  // Must have seller or platform context
+  const contexts = payload.contexts || {};
+  const hasSellerContext = Array.isArray(contexts.seller) && contexts.seller.length > 0;
+  const hasPlatformContext = Array.isArray(contexts.platform) && contexts.platform.length > 0;
+  if (!hasSellerContext && !hasPlatformContext) {
+    return { ok: false, response: jsonError('Insufficient role: requires seller or platform context', 403) };
   }
 
   // Resolve tenant ID: prefer JWT primaryTenantId, fall back to header
@@ -189,7 +190,7 @@ async function handleCustomerList(
   await db.enableForeignKeys();
 
   // Build query
-  const baseCondition = 'tm.tenant_id = ? AND tm.role = \'customer\'';
+  const baseCondition = 'tm.tenant_id = ? AND tm.context = \'customer\'';
   const params: unknown[] = [auth.tenantId];
 
   let searchCondition = '';
@@ -245,7 +246,7 @@ async function handleCustomerDetail(
   const db = new AuthDB(env.AUTH_DB);
   await db.enableForeignKeys();
 
-  const sql = `SELECT u.id, u.email, u.name, u.avatar_url, u.created_at, u.email_verified, tm.status FROM users u JOIN tenant_memberships tm ON u.id = tm.user_id WHERE u.id = ? AND tm.tenant_id = ? AND tm.role = 'customer'`;
+  const sql = `SELECT u.id, u.email, u.name, u.avatar_url, u.created_at, u.email_verified, tm.status FROM users u JOIN tenant_memberships tm ON u.id = tm.user_id WHERE u.id = ? AND tm.tenant_id = ? AND tm.context = 'customer'`;
   const row = await db.raw<CustomerRow & { email_verified: number }>(sql, [customerId, auth.tenantId]);
 
   if (!row) {

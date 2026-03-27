@@ -25,7 +25,9 @@ export interface TenantMembershipRow {
   id: string;
   user_id: string;
   tenant_id: string;
-  role: 'customer' | 'seller' | 'supplier' | 'owner' | 'platform_admin';
+  context: 'customer' | 'seller' | 'supplier' | 'platform';
+  sub_role: 'owner' | 'manager' | 'designer' | 'analyst' | 'marketer'
+    | 'merchandiser' | 'operator' | 'support' | 'operations' | 'finance' | null;
   status: 'active' | 'suspended' | 'invited';
   created_at: string;
 }
@@ -158,18 +160,17 @@ export class AuthDB {
 
   /**
    * Ensure a tenant membership exists for a user.
-   * Only creates with role 'customer' — per security rules, never auto-create
-   * seller or platform_admin roles.
+   * Only creates with context 'customer' and sub_role NULL — per security rules,
+   * never auto-create seller or platform roles.
    *
-   * Note: UNIQUE(user_id, tenant_id, role) after 0002_multi_role migration,
-   * so ON CONFLICT targets the role-specific row.
+   * UNIQUE(user_id, tenant_id, context, sub_role) prevents duplicates.
    */
   async ensureMembership(membershipId: string, userId: string, tenantId: string): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO tenant_memberships (id, user_id, tenant_id, role, status)
-         VALUES (?, ?, ?, 'customer', 'active')
-         ON CONFLICT(user_id, tenant_id, role) DO NOTHING`
+        `INSERT INTO tenant_memberships (id, user_id, tenant_id, context, sub_role, status)
+         VALUES (?, ?, ?, 'customer', NULL, 'active')
+         ON CONFLICT(user_id, tenant_id, context, sub_role) DO NOTHING`
       )
       .bind(membershipId, userId, tenantId)
       .run();
@@ -177,19 +178,19 @@ export class AuthDB {
 
   /**
    * Get all active non-customer memberships for a user.
-   * Used during admin token issuance to populate roles + primaryTenantId.
+   * Used during admin token issuance to populate contexts + primaryTenantId.
    */
   async getAdminMemberships(
     userId: string
-  ): Promise<Array<{ tenant_id: string; role: string }>> {
+  ): Promise<Array<{ tenant_id: string; context: string; sub_role: string }>> {
     const result = await this.db
       .prepare(
-        `SELECT tenant_id, role FROM tenant_memberships
-         WHERE user_id = ? AND role != 'customer' AND status = 'active'
+        `SELECT tenant_id, context, sub_role FROM tenant_memberships
+         WHERE user_id = ? AND context != 'customer' AND status = 'active'
          ORDER BY created_at ASC`
       )
       .bind(userId)
-      .all<{ tenant_id: string; role: string }>();
+      .all<{ tenant_id: string; context: string; sub_role: string }>();
     return result.results;
   }
 
@@ -198,27 +199,28 @@ export class AuthDB {
    * Used by POST /api/internal/memberships for seller/supplier provisioning.
    *
    * Unlike ensureMembership() which hard-codes 'customer', this method
-   * accepts any allowed role. Caller is responsible for role authorization.
+   * accepts any allowed context + sub_role. Caller is responsible for authorization.
    *
-   * UNIQUE(user_id, tenant_id, role) prevents duplicates.
+   * UNIQUE(user_id, tenant_id, context, sub_role) prevents duplicates.
    */
   async createMembership(
     membershipId: string,
     userId: string,
     tenantId: string,
-    role: 'seller' | 'supplier' | 'owner',
+    context: 'seller' | 'supplier' | 'platform',
+    subRole: string,
   ): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO tenant_memberships (id, user_id, tenant_id, role, status)
-         VALUES (?, ?, ?, ?, 'active')`
+        `INSERT INTO tenant_memberships (id, user_id, tenant_id, context, sub_role, status)
+         VALUES (?, ?, ?, ?, ?, 'active')`
       )
-      .bind(membershipId, userId, tenantId, role)
+      .bind(membershipId, userId, tenantId, context, subRole)
       .run();
   }
 
   /**
-   * Get all memberships for a user (all roles, all tenants).
+   * Get all memberships for a user (all contexts, all tenants).
    * Used by GET /api/memberships endpoint.
    */
   async getAllMemberships(
@@ -236,30 +238,61 @@ export class AuthDB {
   }
 
   /**
-   * Get the active owner membership for a tenant.
+   * Get the active owner membership for a tenant in a given context.
    */
-  async getOwnerMembership(tenantId: string): Promise<TenantMembershipRow | null> {
+  async getOwnerMembership(tenantId: string, context: string): Promise<TenantMembershipRow | null> {
     const result = await this.db
       .prepare(
         `SELECT * FROM tenant_memberships
-         WHERE tenant_id = ? AND role = 'owner' AND status = 'active'
+         WHERE tenant_id = ? AND context = ? AND sub_role = 'owner' AND status = 'active'
          LIMIT 1`
       )
-      .bind(tenantId)
+      .bind(tenantId, context)
       .first<TenantMembershipRow>();
     return result ?? null;
   }
 
   /**
-   * Delete a specific membership by user, tenant, and role.
+   * Delete a specific membership by user, tenant, context, and sub_role.
    */
-  async deleteMembership(userId: string, tenantId: string, role: string): Promise<void> {
+  async deleteMembership(userId: string, tenantId: string, context: string, subRole: string): Promise<void> {
     await this.db
       .prepare(
-        `DELETE FROM tenant_memberships WHERE user_id = ? AND tenant_id = ? AND role = ?`
+        `DELETE FROM tenant_memberships WHERE user_id = ? AND tenant_id = ? AND context = ? AND sub_role = ?`
       )
-      .bind(userId, tenantId, role)
+      .bind(userId, tenantId, context, subRole)
       .run();
+  }
+
+  /**
+   * Suspend all non-owner memberships for a user in a given context on a tenant.
+   * Sets status to 'suspended'. Suspended memberships are excluded from JWT building.
+   * Returns the number of rows affected.
+   */
+  async suspendMemberships(userId: string, tenantId: string, context: string): Promise<number> {
+    const result = await this.db
+      .prepare(
+        `UPDATE tenant_memberships SET status = 'suspended'
+         WHERE user_id = ? AND tenant_id = ? AND context = ? AND sub_role != 'owner' AND status = 'active'`
+      )
+      .bind(userId, tenantId, context)
+      .run();
+    return result.meta.changes ?? 0;
+  }
+
+  /**
+   * Reactivate suspended memberships for a user in a given context on a tenant.
+   * Sets status back to 'active'. Returns the number of rows affected.
+   */
+  async reactivateMemberships(userId: string, tenantId: string, context: string): Promise<number> {
+    const result = await this.db
+      .prepare(
+        `UPDATE tenant_memberships SET status = 'active'
+         WHERE user_id = ? AND tenant_id = ? AND context = ? AND status = 'suspended'`
+      )
+      .bind(userId, tenantId, context)
+      .run();
+    return result.meta.changes ?? 0;
   }
 
   /**
@@ -273,16 +306,17 @@ export class AuthDB {
     user_id: string;
     email: string;
     name: string;
-    role: string;
+    context: string;
+    sub_role: string;
     status: string;
     created_at: string;
   }>> {
     const result = await this.db
       .prepare(
-        `SELECT tm.id, tm.user_id, u.email, u.name, tm.role, tm.status, tm.created_at
+        `SELECT tm.id, tm.user_id, u.email, u.name, tm.context, tm.sub_role, tm.status, tm.created_at
          FROM tenant_memberships tm
          JOIN users u ON tm.user_id = u.id
-         WHERE tm.tenant_id = ? AND tm.role != 'customer'
+         WHERE tm.tenant_id = ? AND tm.context != 'customer'
          ORDER BY tm.created_at ASC`
       )
       .bind(tenantId)
@@ -291,7 +325,8 @@ export class AuthDB {
         user_id: string;
         email: string;
         name: string;
-        role: string;
+        context: string;
+        sub_role: string;
         status: string;
         created_at: string;
       }>();
@@ -311,14 +346,14 @@ export class AuthDB {
   }
 
   /**
-   * Count active owner memberships for a user.
-   * Used to enforce the 5-tenant-per-user limit.
+   * Count active seller-owner memberships for a user.
+   * Used to enforce the 5-tenant-per-user limit (seller ownership only).
    */
   async countOwnerMemberships(userId: string): Promise<number> {
     const result = await this.db
       .prepare(
         `SELECT COUNT(*) as count FROM tenant_memberships
-         WHERE user_id = ? AND role = 'owner' AND status = 'active'`
+         WHERE user_id = ? AND context = 'seller' AND sub_role = 'owner' AND status = 'active'`
       )
       .bind(userId)
       .first<{ count: number }>();

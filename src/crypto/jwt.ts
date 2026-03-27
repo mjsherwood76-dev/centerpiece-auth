@@ -20,9 +20,9 @@ export interface JwtPayload {
   iss: string; // AUTH_DOMAIN
   iat: number; // issued at (Unix seconds)
   exp: number; // expiration (Unix seconds)
-  // Phase 2.3 additions (present on admin tokens only)
-  jti?: string;                    // unique token ID (UUID) — enables targeted revocation in Phase 3
-  roles?: string[];                // e.g., ['seller'] — scoped to primaryTenantId tenant
+  // Admin token fields (present on admin tokens only)
+  jti?: string;                    // unique token ID (UUID) — enables targeted revocation
+  contexts?: Record<string, string[]>; // e.g., { seller: ['owner'] } — scoped to primaryTenantId tenant
   primaryTenantId?: string | null; // first active non-customer membership tenant
 }
 
@@ -70,7 +70,7 @@ export async function signJwt(
     exp: now + ttlSeconds,
   };
   if (payload.jti !== undefined) fullPayload.jti = payload.jti;
-  if (payload.roles !== undefined) fullPayload.roles = payload.roles;
+  if (payload.contexts !== undefined) fullPayload.contexts = payload.contexts;
   if (payload.primaryTenantId !== undefined) fullPayload.primaryTenantId = payload.primaryTenantId;
 
   const encodedHeader = base64UrlEncode(JSON.stringify(header));

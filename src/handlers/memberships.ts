@@ -6,7 +6,7 @@
  * Auth: Bearer JWT required. Reads `sub` claim for user ID.
  * Used by the admin SPA to display tenant picker and role context.
  *
- * Response: { memberships: [{ tenantId, role, status }] }
+ * Response: { memberships: [{ tenantId, context, subRole, status }] }
  */
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
@@ -41,7 +41,8 @@ export async function handleMemberships(request: Request, env: Env): Promise<Res
   // ── Format response ──
   const formattedMemberships = memberships.map(m => ({
     tenantId: m.tenant_id,
-    role: m.role,
+    context: m.context,
+    subRole: m.sub_role,
     status: m.status,
   }));
 

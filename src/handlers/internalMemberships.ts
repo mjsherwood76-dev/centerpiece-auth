@@ -1,34 +1,44 @@
 /**
  * Internal Membership Endpoints
  *
- * POST   /api/internal/memberships              — Create membership with specified role
+ * POST   /api/internal/memberships              — Create membership with specified context + subRole
  * DELETE /api/internal/memberships              — Delete a non-owner membership
  * GET    /api/internal/memberships/by-tenant    — List non-customer memberships for a tenant
- * GET    /api/internal/memberships/owner-count  — Count active owner memberships for a user
+ * GET    /api/internal/memberships/owner-count  — Count active seller-owner memberships for a user
+ * PATCH  /api/internal/memberships/suspend      — Suspend all memberships for a user in a context
+ * PATCH  /api/internal/memberships/reactivate   — Reactivate suspended memberships for a user in a context
  *
  * All gated by `X-CP-Internal-Secret` header (constant-time comparison).
  *
  * Security:
  * - Gated by shared internal secret (NOT JWT — caller is a Worker, not a browser)
  * - Constant-time comparison prevents timing attacks
- * - NEVER allows `platform_admin` role creation
- * - Owner deletion is forbidden (System Invariant #7)
+ * - Context+subRole validated against CONTEXT_ROLES map
+ * - Platform context only allowed on __platform__ tenant
+ * - Owner deletion is forbidden (System Invariant #2)
  */
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
+import { ConsoleJsonLogger } from '../core/logger.js';
+import { logAuthEvent } from '../security/auditLog.js';
+
+const logger = new ConsoleJsonLogger();
 
 // ─── Types ──────────────────────────────────────────────────
 
 interface CreateMembershipRequest {
   userId: string;
   tenantId: string;
-  role: 'seller' | 'supplier' | 'owner';
+  context: 'seller' | 'supplier' | 'platform';
+  subRole: 'owner' | 'manager' | 'designer' | 'analyst' | 'marketer'
+    | 'merchandiser' | 'operator' | 'support' | 'operations' | 'finance';
 }
 
 interface DeleteMembershipRequest {
   userId: string;
   tenantId: string;
-  role: string;
+  context: string;
+  subRole: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -71,25 +81,26 @@ function validateInternalSecret(request: Request, env: Env): Response | null {
   return null; // Secret is valid
 }
 
-// ─── Blocked roles ──────────────────────────────────────────
+// ─── Context-SubRole Validation ───────────────────────────────────
 
-/** Roles that can NEVER be created via this internal endpoint. */
-const BLOCKED_ROLES = new Set(['platform_admin', 'customer']);
-
-/** Roles allowed for creation via this endpoint. */
-const ALLOWED_ROLES = new Set(['seller', 'supplier', 'owner']);
+/** Valid sub-roles per context. Single source of truth for context↔sub-role validity. */
+const CONTEXT_ROLES: Record<string, Set<string>> = {
+  seller: new Set(['owner', 'manager', 'designer', 'analyst', 'marketer', 'merchandiser']),
+  supplier: new Set(['owner', 'manager', 'designer', 'analyst', 'marketer', 'operator']),
+  platform: new Set(['owner', 'manager', 'designer', 'analyst', 'marketer', 'support', 'operations', 'finance']),
+};
 
 // ─── POST Handler ───────────────────────────────────────────
 
 /**
  * Handle POST /api/internal/memberships
  *
- * Creates a tenant membership for a user with the specified role.
+ * Creates a tenant membership for a user with the specified context + subRole.
  * Gated by X-CP-Internal-Secret header.
  *
- * Request body: { userId: string, tenantId: string, role: 'seller' | 'supplier' | 'owner' }
- * Response: 201 { membershipId, userId, tenantId, role }
- * Errors: 403 (bad secret / blocked role), 400 (bad input), 409 (exists)
+ * Request body: { userId, tenantId, context, subRole }
+ * Response: 201 { membershipId, userId, tenantId, context, subRole }
+ * Errors: 403 (bad secret), 400 (bad input), 409 (exists)
  */
 async function handlePost(request: Request, env: Env): Promise<Response> {
   // ── Parse request body ──
@@ -100,7 +111,7 @@ async function handlePost(request: Request, env: Env): Promise<Response> {
     return jsonResponse({ error: 'Invalid JSON body' }, 400);
   }
 
-  const { userId, tenantId, role } = body;
+  const { userId, tenantId, context, subRole } = body;
 
   // ── Validate required fields ──
   if (!userId || typeof userId !== 'string') {
@@ -109,16 +120,27 @@ async function handlePost(request: Request, env: Env): Promise<Response> {
   if (!tenantId || typeof tenantId !== 'string') {
     return jsonResponse({ error: 'tenantId is required' }, 400);
   }
-  if (!role || typeof role !== 'string') {
-    return jsonResponse({ error: 'role is required' }, 400);
+  if (!context || typeof context !== 'string') {
+    return jsonResponse({ error: 'context is required' }, 400);
+  }
+  if (!subRole || typeof subRole !== 'string') {
+    return jsonResponse({ error: 'subRole is required' }, 400);
   }
 
-  // ── Block dangerous roles ──
-  if (BLOCKED_ROLES.has(role)) {
-    return jsonResponse({ error: `Role '${role}' cannot be created via this endpoint` }, 403);
+  // ── Validate context ──
+  const validRoles = CONTEXT_ROLES[context];
+  if (!validRoles) {
+    return jsonResponse({ error: `Invalid context: ${context}` }, 400);
   }
-  if (!ALLOWED_ROLES.has(role)) {
-    return jsonResponse({ error: `Invalid role: ${role}` }, 400);
+
+  // ── Validate subRole for this context ──
+  if (!validRoles.has(subRole)) {
+    return jsonResponse({ error: `Invalid subRole '${subRole}' for context '${context}'` }, 400);
+  }
+
+  // ── Enforce platform context only on __platform__ tenant ──
+  if (context === 'platform' && tenantId !== '__platform__') {
+    return jsonResponse({ error: 'Platform context is only valid on __platform__ tenant' }, 400);
   }
 
   // ── Create membership ──
@@ -128,7 +150,7 @@ async function handlePost(request: Request, env: Env): Promise<Response> {
   const membershipId = crypto.randomUUID();
 
   try {
-    await db.createMembership(membershipId, userId, tenantId, role as 'seller' | 'supplier' | 'owner');
+    await db.createMembership(membershipId, userId, tenantId, context as 'seller' | 'supplier' | 'platform', subRole);
   } catch (err: unknown) {
     // Check for UNIQUE constraint violation (membership already exists)
     const message = err instanceof Error ? err.message : String(err);
@@ -137,17 +159,31 @@ async function handlePost(request: Request, env: Env): Promise<Response> {
         error: 'Membership already exists',
         userId,
         tenantId,
-        role,
+        context,
+        subRole,
       }, 409);
     }
     throw err;
   }
 
+  const correlationId = request.headers.get('x-request-id')
+    || request.headers.get('x-correlation-id')
+    || 'unknown';
+
+  logAuthEvent(logger, {
+    event: 'membership.create',
+    ip: request.headers.get('CF-Connecting-IP') || 'internal',
+    route: '/api/internal/memberships',
+    correlationId,
+    details: { userId, tenantId, context, subRole },
+  });
+
   return jsonResponse({
     membershipId,
     userId,
     tenantId,
-    role,
+    context,
+    subRole,
   }, 201);
 }
 
@@ -156,12 +192,12 @@ async function handlePost(request: Request, env: Env): Promise<Response> {
 /**
  * Handle DELETE /api/internal/memberships
  *
- * Deletes a tenant membership. Owner deletion is forbidden (System Invariant #7).
+ * Deletes a tenant membership. Owner deletion is forbidden (System Invariant #2).
  * Gated by X-CP-Internal-Secret header.
  *
- * Request body: { userId: string, tenantId: string, role: string }
- * Response: 200 { deleted: true, userId, tenantId, role }
- * Errors: 403 (owner role / bad secret), 400 (bad input)
+ * Request body: { userId, tenantId, context, subRole }
+ * Response: 200 { deleted: true, userId, tenantId, context, subRole }
+ * Errors: 403 (owner subRole / bad secret), 400 (bad input)
  */
 async function handleDelete(request: Request, env: Env): Promise<Response> {
   // ── Parse request body ──
@@ -172,7 +208,7 @@ async function handleDelete(request: Request, env: Env): Promise<Response> {
     return jsonResponse({ error: 'Invalid JSON body' }, 400);
   }
 
-  const { userId, tenantId, role } = body;
+  const { userId, tenantId, context, subRole } = body;
 
   // ── Validate required fields ──
   if (!userId || typeof userId !== 'string') {
@@ -181,12 +217,15 @@ async function handleDelete(request: Request, env: Env): Promise<Response> {
   if (!tenantId || typeof tenantId !== 'string') {
     return jsonResponse({ error: 'tenantId is required' }, 400);
   }
-  if (!role || typeof role !== 'string') {
-    return jsonResponse({ error: 'role is required' }, 400);
+  if (!context || typeof context !== 'string') {
+    return jsonResponse({ error: 'context is required' }, 400);
+  }
+  if (!subRole || typeof subRole !== 'string') {
+    return jsonResponse({ error: 'subRole is required' }, 400);
   }
 
-  // ── Owner deletion is forbidden (System Invariant #7) ──
-  if (role === 'owner') {
+  // ── Owner deletion is forbidden (System Invariant #2) ──
+  if (subRole === 'owner') {
     return jsonResponse({
       error: 'Owner removal forbidden. Use tenant archive or ownership transfer.',
     }, 403);
@@ -196,13 +235,26 @@ async function handleDelete(request: Request, env: Env): Promise<Response> {
   const db = new AuthDB(env.AUTH_DB);
   await db.enableForeignKeys();
 
-  await db.deleteMembership(userId, tenantId, role);
+  await db.deleteMembership(userId, tenantId, context, subRole);
+
+  const correlationId = request.headers.get('x-request-id')
+    || request.headers.get('x-correlation-id')
+    || 'unknown';
+
+  logAuthEvent(logger, {
+    event: 'membership.delete',
+    ip: request.headers.get('CF-Connecting-IP') || 'internal',
+    route: '/api/internal/memberships',
+    correlationId,
+    details: { userId, tenantId, context, subRole },
+  });
 
   return jsonResponse({
     deleted: true,
     userId,
     tenantId,
-    role,
+    context,
+    subRole,
   }, 200);
 }
 
@@ -214,7 +266,7 @@ async function handleDelete(request: Request, env: Env): Promise<Response> {
  * Lists all non-customer memberships for a tenant (with user details).
  * Gated by X-CP-Internal-Secret header.
  *
- * Response: [{ userId, email, name, role, status, createdAt }]
+ * Response: [{ userId, email, name, context, subRole, status, createdAt }]
  */
 async function handleGetByTenant(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -233,7 +285,8 @@ async function handleGetByTenant(request: Request, env: Env): Promise<Response> 
       userId: m.user_id,
       email: m.email,
       name: m.name,
-      role: m.role,
+      context: m.context,
+      subRole: m.sub_role,
       status: m.status,
       createdAt: m.created_at,
     })),
@@ -298,5 +351,88 @@ export async function handleInternalMemberships(request: Request, env: Env): Pro
     return handleGetOwnerCount(request, env);
   }
 
+  if (method === 'PATCH' && path === '/api/internal/memberships/suspend') {
+    return handleSuspend(request, env);
+  }
+
+  if (method === 'PATCH' && path === '/api/internal/memberships/reactivate') {
+    return handleReactivate(request, env);
+  }
+
   return jsonResponse({ error: 'Not found' }, 404);
+}
+
+// ─── PATCH suspend Handler ──────────────────────────────────
+
+/**
+ * Handle PATCH /api/internal/memberships/suspend
+ *
+ * Suspends all non-owner memberships for a user in a given context on a tenant.
+ * Suspended memberships are excluded from JWT building.
+ *
+ * Request body: { userId, tenantId, context }
+ * Response: 200 { suspended: true, count: number }
+ */
+async function handleSuspend(request: Request, env: Env): Promise<Response> {
+  let body: { userId?: string; tenantId?: string; context?: string };
+  try {
+    body = await request.json() as { userId?: string; tenantId?: string; context?: string };
+  } catch {
+    return jsonResponse({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { userId, tenantId, context } = body;
+  if (!userId || typeof userId !== 'string') {
+    return jsonResponse({ error: 'userId is required' }, 400);
+  }
+  if (!tenantId || typeof tenantId !== 'string') {
+    return jsonResponse({ error: 'tenantId is required' }, 400);
+  }
+  if (!context || typeof context !== 'string') {
+    return jsonResponse({ error: 'context is required' }, 400);
+  }
+
+  const db = new AuthDB(env.AUTH_DB);
+  await db.enableForeignKeys();
+
+  const count = await db.suspendMemberships(userId, tenantId, context);
+
+  return jsonResponse({ suspended: true, count }, 200);
+}
+
+// ─── PATCH reactivate Handler ───────────────────────────────
+
+/**
+ * Handle PATCH /api/internal/memberships/reactivate
+ *
+ * Reactivates suspended memberships for a user in a given context on a tenant.
+ *
+ * Request body: { userId, tenantId, context }
+ * Response: 200 { reactivated: true, count: number }
+ */
+async function handleReactivate(request: Request, env: Env): Promise<Response> {
+  let body: { userId?: string; tenantId?: string; context?: string };
+  try {
+    body = await request.json() as { userId?: string; tenantId?: string; context?: string };
+  } catch {
+    return jsonResponse({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { userId, tenantId, context } = body;
+  if (!userId || typeof userId !== 'string') {
+    return jsonResponse({ error: 'userId is required' }, 400);
+  }
+  if (!tenantId || typeof tenantId !== 'string') {
+    return jsonResponse({ error: 'tenantId is required' }, 400);
+  }
+  if (!context || typeof context !== 'string') {
+    return jsonResponse({ error: 'context is required' }, 400);
+  }
+
+  const db = new AuthDB(env.AUTH_DB);
+  await db.enableForeignKeys();
+
+  const count = await db.reactivateMemberships(userId, tenantId, context);
+
+  return jsonResponse({ reactivated: true, count }, 200);
 }

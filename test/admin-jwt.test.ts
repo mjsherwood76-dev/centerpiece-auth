@@ -1,8 +1,8 @@
 /**
  * Admin JWT Claims Tests — Staging Integration
  *
- * Tests Phase 2.3 Session 1 additions:
- * - Admin audience tokens include jti, roles, primaryTenantId
+ * Tests Permission Model v2 additions:
+ * - Admin audience tokens include jti, contexts, primaryTenantId
  * - PKCE enforcement for admin auth codes
  * - Storefront tokens remain unchanged (backward compatible)
  *
@@ -39,13 +39,13 @@ describe('Admin JWT Claims (Phase 2.3)', () => {
 
       assert.equal(payload.aud, 'storefront');
       assert.equal(payload.jti, undefined, 'storefront token should NOT have jti');
-      assert.equal(payload.roles, undefined, 'storefront token should NOT have roles');
+      assert.equal(payload.contexts, undefined, 'storefront token should NOT have contexts');
       assert.equal(payload.primaryTenantId, undefined, 'storefront token should NOT have primaryTenantId');
     });
   });
 
   describe('admin tokens with audience=admin param', () => {
-    it('should include jti, roles=[], primaryTenantId=null for user with no seller membership', async () => {
+    it('should include jti, contexts={}, primaryTenantId=null for user with no seller membership', async () => {
       const email = uniqueEmail();
       // Register via admin audience
       const res = await postForm('/api/login', {
@@ -87,8 +87,8 @@ describe('Admin JWT Claims (Phase 2.3)', () => {
 
       assert.equal(payload.aud, 'admin', 'JWT aud should be admin');
       assert.ok(payload.jti, 'admin token should have jti (UUID)');
-      assert.ok(Array.isArray(payload.roles), 'admin token should have roles array');
-      assert.deepEqual(payload.roles, [], 'roles should be empty for customer-only user');
+      assert.ok(typeof payload.contexts === 'object', 'admin token should have contexts object');
+      assert.deepEqual(payload.contexts, {}, 'contexts should be empty for customer-only user');
       assert.equal(payload.primaryTenantId, null, 'primaryTenantId should be null for customer-only user');
     });
 
@@ -124,7 +124,7 @@ describe('Admin JWT Claims (Phase 2.3)', () => {
 
       assert.equal(payload.aud, 'admin', 'JWT aud should be admin when redirect is admin domain');
       assert.ok(payload.jti, 'admin token should have jti');
-      assert.ok(Array.isArray(payload.roles), 'admin token should have roles array');
+      assert.ok(typeof payload.contexts === 'object', 'admin token should have contexts object');
     });
   });
 

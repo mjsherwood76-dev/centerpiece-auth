@@ -40,14 +40,15 @@ describe('GET /api/memberships', () => {
     });
 
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { memberships: Array<{ tenantId: string; role: string; status: string }> };
+    const body = (await res.json()) as { memberships: Array<{ tenantId: string; context: string; subRole: string | null; status: string }> };
     assert.ok(Array.isArray(body.memberships), 'should return memberships array');
     // The user was registered with a redirect to *.centerpiece.shop, so they should have
-    // at least one membership with role 'customer'
+    // at least one membership with context 'customer'
     assert.ok(body.memberships.length >= 1, 'should have at least one membership');
-    const customerMembership = body.memberships.find(m => m.role === 'customer');
+    const customerMembership = body.memberships.find(m => m.context === 'customer');
     assert.ok(customerMembership, 'should have a customer membership');
     assert.equal(customerMembership!.status, 'active', 'membership should be active');
+    assert.equal(customerMembership!.subRole, null, 'customer membership should have null subRole');
   });
 
   it('should return 401 for unauthenticated request', async () => {

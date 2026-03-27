@@ -19,7 +19,7 @@
  * 4. If auth code has `code_challenge`: verify PKCE (SHA256(code_verifier) === code_challenge)
  * 5. Delete row immediately (single-use enforcement)
  * 6. Look up user details
- * 7. For admin audience: query tenant_memberships for roles + primaryTenantId
+ * 7. For admin audience: query tenant_memberships for contexts + primaryTenantId
  * 8. Return signed JWT access token
  *
  * Security:
@@ -147,55 +147,66 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
     iss: env.AUTH_DOMAIN,
   };
 
-  // ── Admin token enrichment: add jti, roles, primaryTenantId ──
+  // ── Admin token enrichment: add jti, contexts, primaryTenantId ──
   if (authCodeRow.aud === 'admin') {
     const memberships = await db.getAdminMemberships(user.id);
 
-    // Check for platform_admin on __platform__ tenant (super admin)
-    const isPlatformAdmin = memberships.some(
-      m => m.tenant_id === '__platform__' && m.role === 'platform_admin'
+    // Check for platform owner on __platform__ tenant (super admin)
+    const isPlatformOwner = memberships.some(
+      m => m.tenant_id === '__platform__' && m.context === 'platform' && m.sub_role === 'owner'
     );
 
     let primaryTenantId: string | null;
-    let roles: string[];
+    const contexts: Record<string, string[]> = {};
 
-    if (isPlatformAdmin) {
-      // Super admin: gets platform_admin role, can switch tenants via API.
+    if (isPlatformOwner) {
+      // Super admin: gets platform context, can switch tenants via API.
+      // Build platform contexts from __platform__ memberships
+      const platformMemberships = memberships.filter(m => m.tenant_id === '__platform__' && m.context === 'platform');
+      for (const m of platformMemberships) {
+        if (!contexts['platform']) contexts['platform'] = [];
+        if (m.sub_role && !contexts['platform'].includes(m.sub_role)) {
+          contexts['platform'].push(m.sub_role);
+        }
+      }
+
       // Default primaryTenantId to first real tenant (not __platform__)
       // so the admin SPA can load tenant config without a tenant selector.
-      // Prefer owner membership over seller when choosing primary tenant.
+      // Prefer seller-owner membership when choosing primary tenant.
       const realTenants = memberships.filter(
         m => m.tenant_id !== '__platform__' && m.tenant_id !== '__unknown__'
       );
-      const realTenant = realTenants.find(m => m.role === 'owner') ?? realTenants[0];
-      primaryTenantId = realTenant?.tenant_id ?? '__platform__';
-      // Include platform_admin + any roles from the primary tenant
-      roles = ['platform_admin'];
-      if (realTenant) {
-        const tenantRoles = memberships
-          .filter(m => m.tenant_id === realTenant.tenant_id)
-          .map(m => m.role);
-        for (const r of tenantRoles) {
-          if (!roles.includes(r)) roles.push(r);
+      const realTenant = realTenants.find(m => m.context === 'seller' && m.sub_role === 'owner') ?? realTenants[0];
+      primaryTenantId = realTenant?.tenant_id ?? null;
+
+      // Also include contexts from the primary tenant if one exists
+      if (primaryTenantId) {
+        const tenantMemberships = memberships.filter(m => m.tenant_id === primaryTenantId);
+        for (const m of tenantMemberships) {
+          if (!contexts[m.context]) contexts[m.context] = [];
+          if (m.sub_role && !contexts[m.context].includes(m.sub_role)) {
+            contexts[m.context].push(m.sub_role);
+          }
         }
       }
     } else {
-      // Prefer owner membership over seller when choosing primary tenant
-      const ownerMembership = memberships.find(m => m.role === 'owner');
-      primaryTenantId = ownerMembership?.tenant_id ?? memberships[0]?.tenant_id ?? null;
-      // Scope roles to the primary tenant only (not a global flat list)
-      roles = memberships
-        .filter(m => m.tenant_id === primaryTenantId)
-        .map(m => m.role);
-    }
+      // Prefer tenant where user has seller-owner, then any seller context, then any
+      const ownerMembership = memberships.find(m => m.context === 'seller' && m.sub_role === 'owner');
+      const sellerMembership = memberships.find(m => m.context === 'seller');
+      primaryTenantId = ownerMembership?.tenant_id ?? sellerMembership?.tenant_id ?? memberships[0]?.tenant_id ?? null;
 
-    // Owner implies seller — ensure seller is always present when owner is
-    if (roles.includes('owner') && !roles.includes('seller')) {
-      roles.push('seller');
+      // Build contexts map from memberships on the primary tenant only
+      const primaryMemberships = memberships.filter(m => m.tenant_id === primaryTenantId);
+      for (const m of primaryMemberships) {
+        if (!contexts[m.context]) contexts[m.context] = [];
+        if (m.sub_role && !contexts[m.context].includes(m.sub_role)) {
+          contexts[m.context].push(m.sub_role);
+        }
+      }
     }
 
     jwtPayload.jti = crypto.randomUUID();
-    jwtPayload.roles = roles;
+    jwtPayload.contexts = contexts;
     jwtPayload.primaryTenantId = primaryTenantId;
   }
 

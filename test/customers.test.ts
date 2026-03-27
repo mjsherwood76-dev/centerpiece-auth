@@ -1,13 +1,13 @@
 /**
  * Customer Endpoint Tests — Staging Integration
  *
- * Tests for GET /api/admin/customers and GET /api/admin/customers/:id.
+ * Tests for GET /api/platform/customers and GET /api/platform/customers/:id.
  * Phase 3.1, Session 15.
  *
  * All tests run against the staging auth Worker:
  *   https://centerpiece-auth-staging.mjsherwood76.workers.dev
  *
- * Note: These tests require an admin-audience JWT (seller role).
+ * Note: These tests require an admin-audience JWT (seller context).
  * The test registers a user, creates a seller membership via the
  * internal endpoint, then uses the admin token to query customers.
  */
@@ -17,7 +17,7 @@ import { postJson, uniqueEmail, registerUser, VALID_REDIRECT, get, postForm } fr
 
 const BASE_URL = 'https://centerpiece-auth-staging.mjsherwood76.workers.dev';
 
-describe('GET /api/admin/customers', () => {
+describe('GET /api/platform/customers', () => {
   let adminToken: string;
   let customerUserId: string;
 
@@ -71,14 +71,14 @@ describe('GET /api/admin/customers', () => {
   });
 
   it('should return 401 for unauthenticated request', async () => {
-    const res = await get('/api/admin/customers');
+    const res = await get('/api/platform/customers');
     assert.equal(res.status, 401);
     const body = (await res.json()) as Record<string, string>;
     assert.ok(body.error, 'should return error message');
   });
 
   it('should return 401 for invalid token', async () => {
-    const res = await get('/api/admin/customers', {
+    const res = await get('/api/platform/customers', {
       Authorization: 'Bearer invalid-jwt-token',
     });
     assert.equal(res.status, 401);
@@ -86,23 +86,22 @@ describe('GET /api/admin/customers', () => {
     assert.ok(body.error, 'should return error message');
   });
 
-  it('should return 404 for non-existent customer detail', async () => {
-    // Even without admin token, this should return 401
-    const res = await get('/api/admin/customers/nonexistent-id', {
+  it('should return 401 for invalid token on customer detail', async () => {
+    const res = await get('/api/platform/customers/nonexistent-id', {
       Authorization: 'Bearer invalid-token',
     });
     assert.equal(res.status, 401);
   });
 });
 
-describe('GET /api/admin/customers (route matching)', () => {
+describe('GET /api/platform/customers (route matching)', () => {
   it('should not match POST method', async () => {
-    const res = await fetch(`${BASE_URL}/api/admin/customers`, {
+    const res = await fetch(`${BASE_URL}/api/platform/customers`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
     });
-    // Should be 404 since POST /api/admin/customers is not defined
+    // Should be 404 since POST /api/platform/customers is not defined
     assert.equal(res.status, 404);
   });
 });

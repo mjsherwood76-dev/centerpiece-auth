@@ -1,7 +1,7 @@
 /**
  * Tests for POST /api/internal/memberships — Internal Membership Creation
  *
- * Phase 2.5, Session 3.
+ * Permission Model v2.
  *
  * Integration tests against staging auth Worker.
  * Tests internal service-to-service membership creation endpoint.
@@ -37,7 +37,8 @@ describe('POST /api/internal/memberships', () => {
     const res = await postInternal('/api/internal/memberships', {
       userId: 'user-123',
       tenantId: 'tenant:test',
-      role: 'seller',
+      context: 'seller',
+      subRole: 'manager',
     });
 
     assert.equal(res.status, 403);
@@ -49,7 +50,8 @@ describe('POST /api/internal/memberships', () => {
     const res = await postInternal('/api/internal/memberships', {
       userId: 'user-123',
       tenantId: 'tenant:test',
-      role: 'seller',
+      context: 'seller',
+      subRole: 'manager',
     }, {
       'X-CP-Internal-Secret': 'wrong-secret-value',
     });
@@ -59,23 +61,25 @@ describe('POST /api/internal/memberships', () => {
     assert.equal(body.error, 'Forbidden');
   });
 
-  it('should return 403 when attempting to create platform_admin role', async () => {
+  it('should return 403 when attempting to create with wrong secret', async () => {
     const res = await postInternal('/api/internal/memberships', {
       userId: 'user-123',
-      tenantId: 'tenant:test',
-      role: 'platform_admin',
+      tenantId: '__platform__',
+      context: 'platform',
+      subRole: 'owner',
     }, {
       'X-CP-Internal-Secret': 'wrong-secret-value',
     });
 
-    // Will get 403 for wrong secret, but even with right secret, platform_admin is blocked
+    // Will get 403 for wrong secret
     assert.equal(res.status, 403);
   });
 
-  it('should return 400 when userId is missing', async () => {
+  it('should return 403 when userId is missing with wrong secret', async () => {
     const res = await postInternal('/api/internal/memberships', {
       tenantId: 'tenant:test',
-      role: 'seller',
+      context: 'seller',
+      subRole: 'manager',
     }, {
       // Even with wrong secret, field validation should not be reached
       // but the secret check happens first, so this gets 403
@@ -86,11 +90,12 @@ describe('POST /api/internal/memberships', () => {
     assert.equal(res.status, 403);
   });
 
-  it('should return 400 for invalid role', async () => {
+  it('should return 403 for invalid context with wrong secret', async () => {
     const res = await postInternal('/api/internal/memberships', {
       userId: 'user-123',
       tenantId: 'tenant:test',
-      role: 'invalid-role',
+      context: 'invalid-context',
+      subRole: 'owner',
     }, {
       'X-CP-Internal-Secret': 'wrong-secret',
     });
@@ -124,7 +129,8 @@ describe('POST /api/internal/memberships', () => {
     const res = await postInternal('/api/internal/memberships', {
       userId: 'user-123',
       tenantId: 'tenant:test',
-      role: 'seller',
+      context: 'seller',
+      subRole: 'manager',
     });
 
     // Either 403 (secret set, wrong value) or 503 (secret not set)
