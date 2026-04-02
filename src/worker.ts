@@ -32,6 +32,7 @@ import { handleForgotPassword } from './handlers/forgotPassword.js';
 import { handleResetPassword } from './handlers/resetPassword.js';
 import { handleResetPasswordPage } from './pages/resetPassword.js';
 import { handleMemberships } from './handlers/memberships.js';
+import { handleSwitchTenant } from './handlers/switchTenant.js';
 import { handleInternalMemberships } from './handlers/internalMemberships.js';
 import { handleInternalUserLookup } from './handlers/internalUsers.js';
 import { handleCustomerRoutes } from './handlers/customers.js';
@@ -73,7 +74,7 @@ export default {
 
     try {
       // --- Rate limiting for sensitive endpoints ---
-      const rateLimitedRoutes = ['/api/login', '/api/register', '/api/forgot-password', '/api/reset-password'];
+      const rateLimitedRoutes = ['/api/login', '/api/register', '/api/forgot-password', '/api/reset-password', '/api/switch-tenant'];
       if (method === 'POST' && rateLimitedRoutes.includes(path)) {
         const rateLimitResult = await checkRateLimit(clientIp, path, env);
         if (!rateLimitResult.allowed) {
@@ -212,6 +213,19 @@ export default {
 
       if (method === 'GET' && path === '/api/memberships') {
         response = await handleMemberships(request, env);
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      if (method === 'POST' && path === '/api/switch-tenant') {
+        response = await handleSwitchTenant(request, env);
+        logAuthEvent(logger, {
+          event: 'tenant_switch',
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          statusCode: response.status,
+          correlationId,
+        });
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 

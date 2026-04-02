@@ -5,6 +5,9 @@ export interface Env {
   // D1 Database
   AUTH_DB: D1Database;
 
+  // D1 Database (read-only — tenant name/domain lookups)
+  TENANTS_DB: D1Database;
+
   // KV Namespaces (read-only — tenant branding lookups)
   CANONICAL_INPUTS: KVNamespace;
   TENANT_CONFIGS: KVNamespace;

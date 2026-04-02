@@ -526,3 +526,33 @@ export class AuthDB {
     return result.results;
   }
 }
+
+// ─── TENANTS_DB Queries (read-only, separate D1 binding) ──
+
+/**
+ * Look up tenant names and domains from TENANTS_DB.
+ * Returns a Map of tenantId → { name, domain } for active tenants found.
+ * Tenants not found or not active are omitted from the result.
+ *
+ * @param tenantsDb - The TENANTS_DB D1 binding (read-only)
+ * @param tenantIds - Array of tenant IDs to look up
+ */
+export async function getTenantNames(
+  tenantsDb: D1Database,
+  tenantIds: string[],
+): Promise<Map<string, { name: string; domain: string }>> {
+  const result = new Map<string, { name: string; domain: string }>();
+  if (tenantIds.length === 0) return result;
+
+  const placeholders = tenantIds.map(() => '?').join(', ');
+  const rows = await tenantsDb
+    .prepare(`SELECT id, name, domain FROM tenants WHERE id IN (${placeholders}) AND status = 'active'`)
+    .bind(...tenantIds)
+    .all<{ id: string; name: string; domain: string }>();
+
+  for (const row of rows.results) {
+    result.set(row.id, { name: row.name, domain: row.domain });
+  }
+
+  return result;
+}

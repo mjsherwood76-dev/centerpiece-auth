@@ -51,11 +51,13 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
   let tenantId: string;
   let redirectOrigin: string;
   let codeVerifier: string | undefined;
+  let requestedTenantId: string | undefined; // Optional tenant hint for admin SPA re-auth
 
   try {
     const body = await request.json() as Record<string, string>;
     code = (body.code || '').trim();
     codeVerifier = body.code_verifier ? body.code_verifier.trim() : undefined;
+    requestedTenantId = body.tenantId ? body.tenantId.trim() : undefined;
 
     // Support two field naming conventions:
     // 1. Runtime (server-to-server): tenant_id + redirect_origin
@@ -205,10 +207,43 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
       }
     }
 
+    // ── Optional tenantId override (admin SPA re-auth with stored selection) ──
+    if (requestedTenantId && requestedTenantId !== primaryTenantId) {
+      // Verify membership on requested tenant
+      const hasAccess = isPlatformOwner || memberships.some(
+        m => m.tenant_id === requestedTenantId && m.context !== 'customer',
+      );
+
+      if (hasAccess) {
+        // Override primaryTenantId and rebuild contexts for the requested tenant
+        primaryTenantId = requestedTenantId;
+
+        // Clear and rebuild contexts
+        for (const key of Object.keys(contexts)) {
+          if (key !== 'platform') delete contexts[key];
+        }
+        const tenantMemberships = memberships.filter(m => m.tenant_id === requestedTenantId);
+        for (const m of tenantMemberships) {
+          if (!contexts[m.context]) contexts[m.context] = [];
+          if (m.sub_role && !contexts[m.context].includes(m.sub_role)) {
+            contexts[m.context].push(m.sub_role);
+          }
+        }
+      } else {
+        console.warn(`Token exchange: tenantId hint '${requestedTenantId}' ignored — no membership for user ${user.id}`);
+      }
+    }
+
     jwtPayload.jti = crypto.randomUUID();
     jwtPayload.contexts = contexts;
     jwtPayload.primaryTenantId = primaryTenantId;
   }
+
+  // Track tenantIdFallback for response (must be declared outside admin block scope)
+  const responseTenantIdFallback = (authCodeRow.aud === 'admin' && requestedTenantId) ? (() => {
+    // Check if the requested tenant ended up as primaryTenantId
+    return jwtPayload.primaryTenantId !== requestedTenantId;
+  })() : false;
 
   const accessToken = await signJwt(
     jwtPayload as Parameters<typeof signJwt>[0],
@@ -217,12 +252,17 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
   );
 
   // ── Return token ──
+  const responseBody: Record<string, unknown> = {
+    access_token: accessToken,
+    token_type: 'Bearer',
+    expires_in: ttlSeconds,
+  };
+  if (responseTenantIdFallback) {
+    responseBody.tenantIdFallback = true;
+  }
+
   return new Response(
-    JSON.stringify({
-      access_token: accessToken,
-      token_type: 'Bearer',
-      expires_in: ttlSeconds,
-    }),
+    JSON.stringify(responseBody),
     {
       status: 200,
       headers: {

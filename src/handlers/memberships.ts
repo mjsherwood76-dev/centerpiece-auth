@@ -9,7 +9,7 @@
  * Response: { memberships: [{ tenantId, context, subRole, status }] }
  */
 import type { Env } from '../types.js';
-import { AuthDB } from '../db.js';
+import { AuthDB, getTenantNames } from '../db.js';
 import { verifyJwt } from '../crypto/jwt.js';
 
 /**
@@ -38,13 +38,30 @@ export async function handleMemberships(request: Request, env: Env): Promise<Res
 
   const memberships = await db.getAllMemberships(payload.sub);
 
+  // ── Enrich non-customer memberships with tenant names from TENANTS_DB ──
+  const nonCustomerTenantIds = [
+    ...new Set(
+      memberships
+        .filter(m => m.context !== 'customer')
+        .map(m => m.tenant_id)
+        .filter(id => id !== '__platform__' && id !== '__unknown__'),
+    ),
+  ];
+
+  const tenantNames = await getTenantNames(env.TENANTS_DB, nonCustomerTenantIds);
+
   // ── Format response ──
-  const formattedMemberships = memberships.map(m => ({
-    tenantId: m.tenant_id,
-    context: m.context,
-    subRole: m.sub_role,
-    status: m.status,
-  }));
+  const formattedMemberships = memberships.map(m => {
+    const tenantInfo = tenantNames.get(m.tenant_id);
+    return {
+      tenantId: m.tenant_id,
+      tenantName: tenantInfo?.name ?? null,
+      tenantDomain: tenantInfo?.domain ?? null,
+      context: m.context,
+      subRole: m.sub_role,
+      status: m.status,
+    };
+  });
 
   return new Response(
     JSON.stringify({ memberships: formattedMemberships }),

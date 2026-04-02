@@ -16,6 +16,12 @@ binding = "AUTH_DB"
 database_name = "centerpiece-auth-db"
 database_id = "26717b6e-c8a2-430e-83ed-8664192c662e"
 
+# TENANTS_DB — Read-only D1 binding for tenant name/domain lookups
+[[d1_databases]]
+binding = "TENANTS_DB"
+database_name = "centerpiece-tenants-db"
+database_id = "de252784-85cb-4192-bb97-ebcfe81f5fda"
+
 # KV Namespace Bindings (read-only — for tenant branding lookups)
 [[kv_namespaces]]
 binding = "CANONICAL_INPUTS"
@@ -73,6 +79,11 @@ vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://centerpiece-auth-stagin
 binding = "AUTH_DB"
 database_name = "centerpiece-auth-db-staging"
 database_id = "4b06dd01-13a0-4fd1-a68f-167a4d73a6a3"
+
+[[env.staging.d1_databases]]
+binding = "TENANTS_DB"
+database_name = "centerpiece-tenants-db-staging"
+database_id = "a13b028d-cc66-4e5f-b13a-b425c6c5ff39"
 
 [[env.staging.kv_namespaces]]
 binding = "CANONICAL_INPUTS"
