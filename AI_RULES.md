@@ -37,7 +37,7 @@ It is a standalone Cloudflare Worker (production: `auth.centerpiecelab.com`, sta
 - Storefront rendering — belongs to `centerpiece-site-runtime`
 - Admin UI — belongs to `centerpiece-platform-ui`
 - Product/commerce data — belongs to runtime
-- Email delivery — stub in this phase, real delivery via Phase 1B.3
+- Email delivery infrastructure — uses SendGrid (API key as wrangler secret)
 
 ---
 
@@ -55,7 +55,7 @@ It is a standalone Cloudflare Worker (production: `auth.centerpiecelab.com`, sta
 - If `tenant` param mismatches derived tenant → reject
 
 ### Auto-Created Memberships
-- ONLY create with role `customer` — NEVER `seller` or `platform_admin`
+- ONLY create with context `customer` (sub_role NULL) — NEVER `seller`, `supplier`, or `platform`
 - Only if tenant exists and allows self-serve customers
 
 ### Account Enumeration Prevention
@@ -103,7 +103,7 @@ NOT the other way around.
 
 ### MUST NOT
 - Store plaintext secrets, tokens, or codes in D1
-- Auto-create memberships with roles other than `customer`
+- Auto-create memberships with contexts other than `customer`
 - Import code from `centerpiece-site-runtime` or any other runtime repo
 - Hardcode tenant IDs or domains
 - Skip redirect validation on any redirect-producing handler
@@ -131,13 +131,17 @@ src/
 ├── handlers/              # Route handlers
 │   ├── health.ts
 │   ├── jwks.ts
-│   ├── register.ts        # Email/password registration — Session 3
-│   ├── login.ts           # Email/password login — Session 3
-│   ├── token.ts           # Auth code → JWT exchange — Session 3
-│   ├── refresh.ts         # Refresh token rotation — Session 3
-│   ├── logout.ts          # Single/all session revocation — Session 3
-│   ├── forgotPassword.ts  # Request password reset — Session 6
-│   └── resetPassword.ts   # Complete password reset — Session 6
+│   ├── register.ts        # Email/password registration
+│   ├── login.ts           # Email/password login
+│   ├── token.ts           # Auth code → JWT exchange
+│   ├── refresh.ts         # Refresh token rotation
+│   ├── logout.ts          # Single/all session revocation
+│   ├── forgotPassword.ts  # Request password reset
+│   ├── resetPassword.ts   # Complete password reset
+│   ├── memberships.ts     # GET /api/memberships
+│   ├── internalMemberships.ts  # Service-to-service membership management
+│   ├── internalUsers.ts   # Service-to-service user lookup
+│   └── customers.ts       # Platform customer API
 ├── oauth/                 # OAuth provider integrations — Session 4
 │   ├── base.ts            # Shared OAuth utilities
 │   ├── callback.ts        # Shared callback handler

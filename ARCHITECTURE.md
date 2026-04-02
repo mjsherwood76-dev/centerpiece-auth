@@ -34,16 +34,26 @@ authentication and authorization concerns.
 └──────────┬───────────┘
            │ 1:N
            ▼
-┌──────────────────────┐
-│  tenant_memberships  │  ← Per-tenant authorization
-│  (userId, tenantId,  │
-│   role, status)      │
-└──────────────────────┘
+┌──────────────────────────────┐
+│     tenant_memberships       │  ← Per-tenant authorization
+│  (userId, tenantId,         │
+│   context, sub_role, status) │
+└──────────────────────────────┘
 ```
 
 - One user can be a customer at Store A and a seller at Store B.
-- Roles: `customer`, `seller`, `platform_admin`.
-- Only `customer` role is auto-created; others require explicit invitation.
+- Two-dimensional permission model: **context** (domain) + **sub_role** (capability).
+
+| Context | Sub-Roles | Description |
+|---------|-----------|-------------|
+| `customer` | `NULL` (no sub-role) | Storefront buyer |
+| `seller` | `owner`, `manager`, `designer`, `analyst`, `marketer`, `merchandiser` | Store operator |
+| `supplier` | `owner`, `manager`, `designer`, `operator`, `analyst`, `marketer` | Product supplier |
+| `platform` | `owner`, `manager`, `support`, `operations`, `finance`, `analyst`, `designer`, `marketer` | Platform administrator |
+
+- Only `customer` context is auto-created; all others require explicit invitation.
+- Constraint: `UNIQUE(user_id, tenant_id, context, sub_role)`.
+- Constraint: `customer` context must have `sub_role = NULL`; all others require a non-NULL sub_role.
 
 ---
 
@@ -105,19 +115,22 @@ and redirects back. This is Safari/iOS compatible (no third-party cookie depende
 | Table | Purpose |
 |-------|---------|
 | `users` | Platform-wide user identity |
-| `tenant_memberships` | Per-tenant authorization (userId + tenantId + role) |
+| `tenant_memberships` | Per-tenant authorization (userId + tenantId + context + sub_role) |
 | `oauth_accounts` | Linked OAuth provider accounts |
-| `auth_codes` | Single-use authorization codes (hash stored) |
+| `auth_codes` | Single-use authorization codes (hash stored, PKCE support) |
 | `refresh_tokens` | Refresh token tracking with family-based rotation |
-| `oauth_states` | CSRF protection for OAuth flows |
+| `oauth_states` | CSRF protection for OAuth flows (PKCE + nonce + audience) |
 | `password_reset_tokens` | Password reset tokens (hash stored) |
 
 ### Critical Constraints
 
 - `PRAGMA foreign_keys = ON` must run per-connection (D1/SQLite requirement)
 - All tokens stored as SHA-256 hashes — never plaintext
-- `tenant_memberships` has `UNIQUE(user_id, tenant_id)` constraint
+- `tenant_memberships` has `UNIQUE(user_id, tenant_id, context, sub_role)` constraint
+- `tenant_memberships` enforces: `(context = 'customer' AND sub_role IS NULL) OR (context != 'customer' AND sub_role IS NOT NULL)`
+- Partial unique index enforces one `owner` sub_role per context per tenant
 - `oauth_accounts` has `UNIQUE(provider, provider_account_id)` constraint
+- `auth_codes` support PKCE via `code_challenge` + `code_challenge_method` columns
 
 ---
 
@@ -158,6 +171,17 @@ These are the SAME KV namespaces used by `centerpiece-site-runtime` — shared r
 | `/api/reset-password` | POST | Complete password reset |
 | `/api/logout` | POST | Revoke single session |
 | `/api/logout-all` | POST | Revoke all sessions |
+| `/api/memberships` | GET | Get authenticated user's tenant memberships |
+
+### Platform API (Service-to-Service)
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/platform/customers/{tenantId}` | GET | List customers for a tenant |
+| `/api/platform/customers/{tenantId}/{userId}` | GET | Get customer detail |
+| `/api/internal/memberships/{tenantId}/{userId}` | GET | Get user's memberships for tenant |
+| `/api/internal/memberships` | POST | Create membership (service-to-service) |
+| `/api/internal/memberships/{id}` | DELETE | Delete membership (service-to-service) |
+| `/api/internal/users/by-email` | GET | Look up user by email (service-to-service) |
 
 ### OAuth (Session 4)
 | Route | Method | Purpose |
@@ -224,9 +248,14 @@ All responses include:
 
 ### Password Reset Flow
 1. `POST /api/forgot-password` → generates random token, stores SHA-256 hash in D1
-2. (Stub) Logs reset URL to console (real email delivery in Phase 1B.3)
+2. Sends reset link via SendGrid email (using `EMAIL_FROM` / `EMAIL_FROM_NAME` env vars)
 3. Always returns generic success (account enumeration prevention)
 4. `POST /api/reset-password` → validates token hash + expiration, updates password, revokes all refresh tokens
+
+### Email Integration
+- **Provider:** SendGrid via REST API (`SENDGRID_API_KEY` secret)
+- **Templates:** Password reset emails with branded formatting
+- **Error handling:** Email failures are logged but do not block the API response
 
 ### JWT Signing
 - ES256 (ECDSA P-256) — asymmetric
@@ -291,7 +320,7 @@ do not support PKCE but we store verifiers for consistency.
 | Contract | Format | Location | Breaking Change Policy |
 |----------|--------|----------|------------------------|
 | JWKS endpoint | JSON (`{ keys: [{ kty, crv, x, y, kid, alg, use }] }`) | `/.well-known/jwks.json` | Adding keys is safe; removing/changing `kid` is breaking |
-| JWT claims | `{ sub, aud, iss, exp, iat, tid, role, kid }` | Access token payload | Adding claims is safe; removing/renaming is breaking |
+| JWT claims | `{ sub, aud, iss, exp, iat, jti, contexts, primaryTenantId, email, name, kid }` | Access token payload | Adding claims is safe; removing/renaming is breaking |
 | Auth code exchange | `POST /api/token { code, redirect_uri }` → `{ access_token, token_type, expires_in }` | `/api/token` | Changing request/response shape is breaking |
 | Redirect flow | `302` redirect with `?code=` parameter to validated `redirect_uri` | Login/register handlers | Changing redirect behavior is breaking |
 | Rate limit responses | `429 Too Many Requests` with `Retry-After` header | Rate-limited routes | Changing status code is breaking |
@@ -301,7 +330,7 @@ do not support PKCE but we store verifiers for consistency.
 | Contract Type | Examples |
 |---------------|----------|
 | HTTP endpoints | `/api/login`, `/api/register`, `/api/token`, `/api/refresh`, `/.well-known/jwks.json` |
-| JWT format | ES256-signed, `kid: "v1"`, claims: `sub`, `aud`, `tid`, `role` |
+| JWT format | ES256-signed, `kid: "v1"`, claims: `sub`, `aud`, `iss`, `exp`, `iat`, `contexts`, `primaryTenantId`, `email`, `name` |
 | Cookie names | `cp_access` (tenant domain), `cp_refresh` (auth domain) |
 | KV bindings (read-only) | `CANONICAL_INPUTS`, `TENANT_CONFIGS` |
 | D1 database | `AUTH_DB` (7 tables: users, tenant_memberships, oauth_accounts, auth_codes, refresh_tokens, oauth_states, password_reset_tokens) |
