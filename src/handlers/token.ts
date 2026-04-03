@@ -151,7 +151,19 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
 
   // ── Admin token enrichment: add jti, contexts, primaryTenantId ──
   if (authCodeRow.aud === 'admin') {
-    const memberships = await db.getAdminMemberships(user.id);
+    let memberships = await db.getAdminMemberships(user.id);
+
+    // ── Defense-in-Depth Layer 2: strip platform context for non-@centerpiecelab.com emails ──
+    if (!user.email.endsWith('@centerpiecelab.com')) {
+      const before = memberships.length;
+      memberships = memberships.filter(m => m.context !== 'platform');
+      if (memberships.length !== before) {
+        console.warn('Token issuance: stripped platform context for non-centerpiecelab email', {
+          userId: user.id,
+          email: user.email,
+        });
+      }
+    }
 
     // Check for platform owner on __platform__ tenant (super admin)
     const isPlatformOwner = memberships.some(

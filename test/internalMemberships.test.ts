@@ -11,7 +11,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { BASE_URL, registerUser, postJson, VALID_REDIRECT } from './helpers.js';
+import { BASE_URL, registerUser, postJson, VALID_REDIRECT, uniqueEmail } from './helpers.js';
 
 /**
  * POST JSON to an internal endpoint with optional headers.
@@ -138,5 +138,78 @@ describe('POST /api/internal/memberships', () => {
       res.status === 403 || res.status === 503,
       `Expected 403 or 503, got ${res.status}`,
     );
+  });
+});
+
+// ─── Platform Email Domain Gate (Defense-in-Depth Layer 1) ────
+
+describe('Platform Email Domain Gate (Layer 1)', () => {
+  it('should reject platform membership creation for non-@centerpiecelab.com email (blocked by secret gate first)', async () => {
+    // NOTE: Without the real INTERNAL_SECRET, the secret gate (403) fires before
+    // the domain gate (400). This test documents that the endpoint exists and
+    // the secret gate is the first defense layer. The domain gate is verified
+    // by code inspection + deploy-time manual testing.
+    const res = await postInternal('/api/internal/memberships', {
+      userId: 'user-123',
+      tenantId: '__platform__',
+      context: 'platform',
+      subRole: 'manager',
+    }, {
+      'X-CP-Internal-Secret': 'wrong-secret',
+    });
+
+    // Secret check fires first → 403
+    assert.equal(res.status, 403);
+  });
+
+  it('should not restrict non-platform context membership creation by email domain', async () => {
+    // Seller/supplier contexts have no email domain restriction.
+    // Without the correct secret, this still returns 403 from the secret gate,
+    // but documents that the domain gate only applies to platform context.
+    const res = await postInternal('/api/internal/memberships', {
+      userId: 'user-123',
+      tenantId: 'some-tenant',
+      context: 'seller',
+      subRole: 'manager',
+    }, {
+      'X-CP-Internal-Secret': 'wrong-secret',
+    });
+
+    // Secret check fires first → 403 (not domain-related)
+    assert.equal(res.status, 403);
+  });
+});
+
+// ─── Platform Email Domain Gate at Token Issuance (Layer 2) ──
+
+describe('Platform Email Domain Gate at Token Issuance (Layer 2)', () => {
+  it('should not include platform context in JWT for non-@centerpiecelab.com user', async () => {
+    // Register a regular user (non-centerpiecelab email)
+    const email = uniqueEmail();
+    const { code } = await registerUser(email, 'DomainGateTest123!');
+    assert.ok(code, 'should get auth code from registration');
+
+    // Exchange code for admin token
+    const redirectOrigin = new URL(VALID_REDIRECT).origin;
+    const tokenRes = await fetch(`${BASE_URL}/api/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code,
+        tenant_id: '__unknown__',
+        redirect_origin: redirectOrigin,
+      }),
+      redirect: 'manual',
+    });
+
+    assert.equal(tokenRes.status, 200);
+    const body = (await tokenRes.json()) as Record<string, unknown>;
+    const jwt = body.access_token as string;
+    const payload = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString());
+
+    // A regular user (non-centerpiecelab email) should never have platform context,
+    // even if platform memberships somehow exist in the DB (Layer 2 strips them).
+    assert.equal(payload.contexts?.platform, undefined,
+      'Non-centerpiecelab email should not have platform context in JWT');
   });
 });

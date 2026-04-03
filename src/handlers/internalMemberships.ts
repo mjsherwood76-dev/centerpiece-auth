@@ -143,6 +143,16 @@ async function handlePost(request: Request, env: Env): Promise<Response> {
     return jsonResponse({ error: 'Platform context is only valid on __platform__ tenant' }, 400);
   }
 
+  // ── Enforce @centerpiecelab.com email for platform context (Defense-in-Depth Layer 1) ──
+  if (context === 'platform') {
+    const db = new AuthDB(env.AUTH_DB);
+    await db.enableForeignKeys();
+    const user = await db.getUserById(userId);
+    if (!user || !user.email.endsWith('@centerpiecelab.com')) {
+      return jsonResponse({ error: 'Platform context requires @centerpiecelab.com email' }, 400);
+    }
+  }
+
   // ── Create membership ──
   const db = new AuthDB(env.AUTH_DB);
   await db.enableForeignKeys();

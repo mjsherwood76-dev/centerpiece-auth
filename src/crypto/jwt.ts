@@ -24,6 +24,9 @@ export interface JwtPayload {
   jti?: string;                    // unique token ID (UUID) — enables targeted revocation
   contexts?: Record<string, string[]>; // e.g., { seller: ['owner'] } — scoped to primaryTenantId tenant
   primaryTenantId?: string | null; // first active non-customer membership tenant
+  // Impersonation claims (present only on impersonation tokens)
+  impersonatedBy?: string;         // admin userId who initiated impersonation
+  sessionType?: 'impersonation';   // marks this as an impersonation token
 }
 
 export interface JwtHeader {
@@ -72,6 +75,8 @@ export async function signJwt(
   if (payload.jti !== undefined) fullPayload.jti = payload.jti;
   if (payload.contexts !== undefined) fullPayload.contexts = payload.contexts;
   if (payload.primaryTenantId !== undefined) fullPayload.primaryTenantId = payload.primaryTenantId;
+  if (payload.impersonatedBy !== undefined) fullPayload.impersonatedBy = payload.impersonatedBy;
+  if (payload.sessionType !== undefined) fullPayload.sessionType = payload.sessionType;
 
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(fullPayload));

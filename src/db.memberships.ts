@@ -24,7 +24,10 @@ export async function getMembership(
  * Only creates with context 'customer' and sub_role NULL — per security rules,
  * never auto-create seller or platform roles.
  *
- * UNIQUE(user_id, tenant_id, context, sub_role) prevents duplicates.
+ * Uses INSERT WHERE NOT EXISTS instead of ON CONFLICT because SQLite treats
+ * NULLs as distinct in UNIQUE constraints — the ON CONFLICT clause on
+ * (user_id, tenant_id, context, sub_role) never fires when sub_role is NULL,
+ * causing duplicate customer rows on every login.
  */
 export async function ensureMembership(
   db: D1Database, membershipId: string, userId: string, tenantId: string,
@@ -32,10 +35,13 @@ export async function ensureMembership(
   await db
     .prepare(
       `INSERT INTO tenant_memberships (id, user_id, tenant_id, context, sub_role, status)
-       VALUES (?, ?, ?, 'customer', NULL, 'active')
-       ON CONFLICT(user_id, tenant_id, context, sub_role) DO NOTHING`
+       SELECT ?, ?, ?, 'customer', NULL, 'active'
+       WHERE NOT EXISTS (
+         SELECT 1 FROM tenant_memberships
+         WHERE user_id = ? AND tenant_id = ? AND context = 'customer'
+       )`
     )
-    .bind(membershipId, userId, tenantId)
+    .bind(membershipId, userId, tenantId, userId, tenantId)
     .run();
 }
 

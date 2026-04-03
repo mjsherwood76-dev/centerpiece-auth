@@ -35,6 +35,8 @@ import { handleMemberships } from './handlers/memberships.js';
 import { handleSwitchTenant } from './handlers/switchTenant.js';
 import { handleInternalMemberships } from './handlers/internalMemberships.js';
 import { handleInternalUserLookup } from './handlers/internalUsers.js';
+import { handleInternalCustomers } from './handlers/internalCustomers.js';
+import { handleImpersonate } from './handlers/impersonate.js';
 import { handleCustomerRoutes } from './handlers/customers.js';
 import { checkRateLimit } from './security/rateLimit.js';
 import { addSecurityHeaders, handleCorsPreflightValidated } from './security/headers.js';
@@ -255,6 +257,32 @@ export default {
         response = await handleInternalUserLookup(request, env);
         logAuthEvent(logger, {
           event: 'internal_user_lookup',
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          statusCode: response.status,
+          correlationId,
+        });
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      if (method === 'GET' && path === '/api/internal/customers') {
+        response = await handleInternalCustomers(request, env);
+        logAuthEvent(logger, {
+          event: 'internal_customers_list',
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          statusCode: response.status,
+          correlationId,
+        });
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      if (method === 'POST' && path === '/api/internal/impersonate') {
+        response = await handleImpersonate(request, env);
+        logAuthEvent(logger, {
+          event: 'internal_impersonate',
           ip: clientIp,
           route: path,
           userAgent: request.headers.get('User-Agent'),
