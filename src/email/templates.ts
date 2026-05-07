@@ -1,4 +1,5 @@
 /**
+ * @deprecated Retained as the legacy fallback while platform-api template rendering rolls out.
  * Email HTML Template Builders
  *
  * Generates branded HTML emails for auth flows.

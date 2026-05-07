@@ -1,4 +1,5 @@
 /**
+ * @deprecated Retained as the legacy fallback while platform-api template rendering rolls out.
  * SendGrid HTTP API v3 Client
  *
  * Minimal fetch-based client for transactional email sending.

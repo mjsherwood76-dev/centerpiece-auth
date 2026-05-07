@@ -12,6 +12,9 @@ export interface Env {
   CANONICAL_INPUTS: KVNamespace;
   TENANT_CONFIGS: KVNamespace;
 
+  // Service Bindings
+  PLATFORM_API?: import('./email/platformApiClient.js').PlatformApiEmailBinding;
+
   // Environment variables
   ENVIRONMENT: string;
   AUTH_DOMAIN: string;

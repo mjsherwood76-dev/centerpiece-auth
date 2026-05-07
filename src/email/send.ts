@@ -11,6 +11,7 @@
 import type { Env } from '../types.js';
 import type { TenantBranding } from '../branding.js';
 import type { Logger } from '../core/logger.js';
+import { sendViaPlatformApi, type TransactionalEmailResult } from './platformApiClient.js';
 import { sendViaSendGrid } from './sendgridClient.js';
 import {
   buildPasswordResetEmail,
@@ -79,6 +80,19 @@ function buildEmailBranding(branding: TenantBranding): EmailBranding {
   };
 }
 
+async function tryTemplateRenderer(
+  env: Env,
+  input: Parameters<typeof sendViaPlatformApi>[1],
+): Promise<TransactionalEmailResult | null> {
+  try {
+    const result = await sendViaPlatformApi(env.PLATFORM_API, input);
+    if (result?.status === 'skipped' && result.reason === 'template_renderer_disabled') return null;
+    return result;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Send Functions ─────────────────────────────────────────
 
 /**
@@ -96,6 +110,29 @@ export async function sendPasswordResetEmail(
   const redacted = redactEmail(to);
   const logger = context?.logger ?? null;
   const correlationId = context?.correlationId ?? 'unknown';
+
+  const templateResult = await tryTemplateRenderer(env, {
+    templateId: 'password-reset',
+    tenantId: context?.tenantId ?? branding.tenantId,
+    recipient: { email: to },
+    variables: {
+      customerName: to.split('@')[0] || 'there',
+      resetUrl,
+      expiresIn: '60 minutes',
+    },
+    idempotencyKey: context?.userId ? `auth:${context.userId}:password-reset:${resetUrl}` : undefined,
+  });
+  if (templateResult) {
+    logEmailEvent(logger, correlationId, {
+      event: templateResult.status === 'sent' ? 'email.sent' : 'email.skipped',
+      type: emailType,
+      to: redacted,
+      reason: templateResult.reason,
+      tenantId: context?.tenantId,
+      userId: context?.userId,
+    });
+    return;
+  }
 
   if (!env.SENDGRID_API_KEY) {
     logEmailEvent(logger, correlationId, {
@@ -179,6 +216,28 @@ export async function sendWelcomeEmail(
   const logger = context?.logger ?? null;
   const correlationId = context?.correlationId ?? 'unknown';
 
+  const templateResult = await tryTemplateRenderer(env, {
+    templateId: 'welcome',
+    tenantId: context?.tenantId ?? branding.tenantId,
+    recipient: { email: to, name: userName },
+    variables: {
+      customerName: userName || 'there',
+      signInUrl: loginUrl,
+    },
+    idempotencyKey: context?.userId ? `auth:${context.userId}:welcome` : undefined,
+  });
+  if (templateResult) {
+    logEmailEvent(logger, correlationId, {
+      event: templateResult.status === 'sent' ? 'email.sent' : 'email.skipped',
+      type: emailType,
+      to: redacted,
+      reason: templateResult.reason,
+      tenantId: context?.tenantId,
+      userId: context?.userId,
+    });
+    return;
+  }
+
   if (!env.SENDGRID_API_KEY) {
     logEmailEvent(logger, correlationId, {
       event: 'email.skipped',
@@ -256,6 +315,27 @@ export async function sendPasswordChangedEmail(
   const redacted = redactEmail(to);
   const logger = context?.logger ?? null;
   const correlationId = context?.correlationId ?? 'unknown';
+
+  const templateResult = await tryTemplateRenderer(env, {
+    templateId: 'password-changed',
+    tenantId: context?.tenantId ?? branding.tenantId,
+    recipient: { email: to },
+    variables: {
+      customerName: to.split('@')[0] || 'there',
+      signInUrl: forgotPasswordUrl.replace('/forgot-password', '/login'),
+    },
+  });
+  if (templateResult) {
+    logEmailEvent(logger, correlationId, {
+      event: templateResult.status === 'sent' ? 'email.sent' : 'email.skipped',
+      type: emailType,
+      to: redacted,
+      reason: templateResult.reason,
+      tenantId: context?.tenantId,
+      userId: context?.userId,
+    });
+    return;
+  }
 
   if (!env.SENDGRID_API_KEY) {
     logEmailEvent(logger, correlationId, {
