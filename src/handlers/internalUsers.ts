@@ -13,6 +13,7 @@
  */
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
+import { constantTimeEqual } from '../security/constantTime.js';
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -21,18 +22,6 @@ function jsonResponse(body: unknown, status: number): Response {
     status,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
-}
-
-/**
- * Constant-time string comparison to prevent timing attacks.
- */
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
 }
 
 // ─── Handler ────────────────────────────────────────────────

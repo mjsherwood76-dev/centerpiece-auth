@@ -11,6 +11,7 @@
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
+import { constantTimeEqual } from '../security/constantTime.js';
 
 const logger = new ConsoleJsonLogger();
 
@@ -25,18 +26,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function jsonError(message: string, status: number): Response {
   return jsonResponse({ error: message }, status);
-}
-
-/**
- * Constant-time string comparison to prevent timing attacks.
- */
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
 }
 
 /**

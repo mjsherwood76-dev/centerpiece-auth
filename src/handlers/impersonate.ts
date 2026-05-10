@@ -16,6 +16,7 @@ import type { Env } from '../types.js';
 import { signJwt } from '../crypto/jwt.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
+import { constantTimeEqual } from '../security/constantTime.js';
 
 const logger = new ConsoleJsonLogger();
 
@@ -129,11 +130,3 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}
