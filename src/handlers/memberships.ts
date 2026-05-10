@@ -11,6 +11,7 @@
 import type { Env } from '../types.js';
 import { AuthDB, getTenantNames } from '../db.js';
 import { verifyJwt } from '../crypto/jwt.js';
+import { jsonError } from '../util/httpJson.js';
 
 /**
  * Handle GET /api/memberships
@@ -75,11 +76,3 @@ export async function handleMemberships(request: Request, env: Env): Promise<Res
   );
 }
 
-// ─── Helpers ────────────────────────────────────────────────
-
-function jsonError(message: string, status: number): Response {
-  return new Response(JSON.stringify({ error: message }), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  });
-}

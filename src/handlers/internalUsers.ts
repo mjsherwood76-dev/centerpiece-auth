@@ -13,15 +13,9 @@
  */
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
+import { jsonResponse } from '../util/httpJson.js';
 
 // ─── Helpers ────────────────────────────────────────────────
-
-function jsonResponse(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  });
-}
 
 /**
  * Constant-time string comparison to prevent timing attacks.

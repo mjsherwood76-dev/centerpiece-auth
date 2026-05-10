@@ -11,21 +11,11 @@
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
+import { jsonResponse, jsonError } from '../util/httpJson.js';
 
 const logger = new ConsoleJsonLogger();
 
 // ─── Helpers ────────────────────────────────────────────────
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  });
-}
-
-function jsonError(message: string, status: number): Response {
-  return jsonResponse({ error: message }, status);
-}
 
 /**
  * Constant-time string comparison to prevent timing attacks.
