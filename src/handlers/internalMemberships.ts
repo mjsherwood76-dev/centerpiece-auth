@@ -21,7 +21,7 @@ import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
-import { constantTimeEqual } from '../security/constantTime.js';
+import { requireInternalSecret } from '../security/internalSecret.js';
 
 const logger = new ConsoleJsonLogger();
 
@@ -49,24 +49,6 @@ function jsonResponse(body: unknown, status: number): Response {
     status,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
-}
-
-/**
- * Validate the X-CP-Internal-Secret header.
- * Returns a Response if validation fails, or null if the secret is valid.
- */
-function validateInternalSecret(request: Request, env: Env): Response | null {
-  const internalSecret = env.INTERNAL_SECRET;
-  if (!internalSecret) {
-    return jsonResponse({ error: 'Internal endpoint not configured' }, 503);
-  }
-
-  const providedSecret = request.headers.get('X-CP-Internal-Secret') || '';
-  if (!constantTimeEqual(providedSecret, internalSecret)) {
-    return jsonResponse({ error: 'Forbidden' }, 403);
-  }
-
-  return null; // Secret is valid
 }
 
 // ─── Context-SubRole Validation ───────────────────────────────────
@@ -326,8 +308,8 @@ async function handleGetOwnerCount(request: Request, env: Env): Promise<Response
  */
 export async function handleInternalMemberships(request: Request, env: Env): Promise<Response> {
   // ── Verify internal secret (shared across all methods) ──
-  const secretError = validateInternalSecret(request, env);
-  if (secretError) return secretError;
+  const denied = requireInternalSecret(request, env);
+  if (denied) return denied;
 
   const method = request.method;
   const url = new URL(request.url);

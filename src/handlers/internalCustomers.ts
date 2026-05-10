@@ -11,7 +11,7 @@
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
-import { constantTimeEqual } from '../security/constantTime.js';
+import { requireInternalSecret } from '../security/internalSecret.js';
 
 const logger = new ConsoleJsonLogger();
 
@@ -26,23 +26,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function jsonError(message: string, status: number): Response {
   return jsonResponse({ error: message }, status);
-}
-
-/**
- * Validate the X-CP-Internal-Secret header.
- */
-function validateInternalSecret(request: Request, env: Env): Response | null {
-  const internalSecret = env.INTERNAL_SECRET;
-  if (!internalSecret) {
-    return jsonResponse({ error: 'Internal endpoint not configured' }, 503);
-  }
-
-  const providedSecret = request.headers.get('X-CP-Internal-Secret') || '';
-  if (!constantTimeEqual(providedSecret, internalSecret)) {
-    return jsonResponse({ error: 'Forbidden' }, 403);
-  }
-
-  return null;
 }
 
 // ─── Types ──────────────────────────────────────────────────
@@ -74,8 +57,8 @@ interface CountRow {
  */
 export async function handleInternalCustomers(request: Request, env: Env): Promise<Response> {
   // Verify internal secret
-  const secretError = validateInternalSecret(request, env);
-  if (secretError) return secretError;
+  const denied = requireInternalSecret(request, env);
+  if (denied) return denied;
 
   if (request.method !== 'GET') {
     return jsonError('Method not allowed', 405);

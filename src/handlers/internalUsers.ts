@@ -13,7 +13,7 @@
  */
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
-import { constantTimeEqual } from '../security/constantTime.js';
+import { requireInternalSecret } from '../security/internalSecret.js';
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -36,15 +36,8 @@ function jsonResponse(body: unknown, status: number): Response {
  */
 export async function handleInternalUserLookup(request: Request, env: Env): Promise<Response> {
   // ── Verify internal secret ──
-  const internalSecret = env.INTERNAL_SECRET;
-  if (!internalSecret) {
-    return jsonResponse({ error: 'Internal endpoint not configured' }, 503);
-  }
-
-  const providedSecret = request.headers.get('X-CP-Internal-Secret') || '';
-  if (!constantTimeEqual(providedSecret, internalSecret)) {
-    return jsonResponse({ error: 'Forbidden' }, 403);
-  }
+  const denied = requireInternalSecret(request, env);
+  if (denied) return denied;
 
   // ── Parse query parameter ──
   const url = new URL(request.url);

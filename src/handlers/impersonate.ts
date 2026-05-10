@@ -16,7 +16,7 @@ import type { Env } from '../types.js';
 import { signJwt, buildImpersonationJwtPayload } from '../crypto/jwt.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
-import { constantTimeEqual } from '../security/constantTime.js';
+import { requireInternalSecret } from '../security/internalSecret.js';
 
 const logger = new ConsoleJsonLogger();
 
@@ -35,15 +35,8 @@ interface ImpersonateRequest {
 
 export async function handleImpersonate(request: Request, env: Env): Promise<Response> {
   // ── Validate internal secret ──
-  const internalSecret = env.INTERNAL_SECRET;
-  if (!internalSecret) {
-    return jsonResponse({ error: 'Internal endpoint not configured' }, 503);
-  }
-
-  const providedSecret = request.headers.get('X-CP-Internal-Secret') || '';
-  if (!constantTimeEqual(providedSecret, internalSecret)) {
-    return jsonResponse({ error: 'Forbidden' }, 403);
-  }
+  const denied = requireInternalSecret(request, env);
+  if (denied) return denied;
 
   // ── Parse body ──
   let body: ImpersonateRequest;
