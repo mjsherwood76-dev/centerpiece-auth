@@ -13,7 +13,7 @@
  * - Caller must pass their userId, contexts, and reason for audit
  */
 import type { Env } from '../types.js';
-import { signJwt } from '../crypto/jwt.js';
+import { signJwt, buildImpersonationJwtPayload } from '../crypto/jwt.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
 import { constantTimeEqual } from '../security/constantTime.js';
@@ -80,20 +80,17 @@ export async function handleImpersonate(request: Request, env: Env): Promise<Res
   // The admin gets seller:owner context on the target tenant,
   // plus the impersonatedBy + sessionType claims for audit/denylist.
   const accessToken = await signJwt(
-    {
-      sub: userId,
+    buildImpersonationJwtPayload({
+      userId,
       email,
       name: name || '',
-      aud: 'admin' as const,
       iss: env.AUTH_DOMAIN,
-      jti: crypto.randomUUID(),
-      contexts: {
-        seller: ['owner'],
-      },
-      primaryTenantId: tenantId,
+      tenantId,
+      // Preserves existing behaviour: admin's own userId is the audit marker
+      // for who initiated the impersonation. (See AUTH-7 follow-up if this
+      // ever needs to diverge from `sub`.)
       impersonatedBy: userId,
-      sessionType: 'impersonation',
-    },
+    }),
     env.JWT_PRIVATE_KEY,
     IMPERSONATION_TTL_SECONDS,
   );

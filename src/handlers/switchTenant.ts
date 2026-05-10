@@ -22,7 +22,7 @@
  */
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
-import { verifyJwt, signJwt } from '../crypto/jwt.js';
+import { verifyJwt, signJwt, buildAdminJwtPayload } from '../crypto/jwt.js';
 
 export async function handleSwitchTenant(request: Request, env: Env): Promise<Response> {
   // ── Extract and verify JWT ──
@@ -138,16 +138,14 @@ export async function handleSwitchTenant(request: Request, env: Env): Promise<Re
   }
 
   const accessToken = await signJwt(
-    {
-      sub: user.id,
+    buildAdminJwtPayload({
+      userId: user.id,
       email: user.email,
       name: user.name || '',
-      aud: 'admin',
       iss: env.AUTH_DOMAIN,
-      jti: crypto.randomUUID(),
       contexts,
       primaryTenantId: requestedTenantId,
-    },
+    }),
     env.JWT_PRIVATE_KEY,
     ttlSeconds,
   );

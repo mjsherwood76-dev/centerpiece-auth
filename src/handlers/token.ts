@@ -31,7 +31,13 @@
  */
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
-import { signJwt, sha256Hex } from '../crypto/jwt.js';
+import {
+  signJwt,
+  sha256Hex,
+  buildCustomerJwtPayload,
+  buildAdminJwtPayload,
+  type UnsignedJwtClaims,
+} from '../crypto/jwt.js';
 
 /**
  * Handle POST /api/token
@@ -140,16 +146,12 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
   // ── Sign JWT ──
   const ttlSeconds = parseInt(env.ACCESS_TOKEN_TTL_SECONDS || '900', 10);
 
-  // Build base payload
-  const jwtPayload: Record<string, unknown> = {
-    sub: user.id,
-    email: user.email,
-    name: user.name || '',
-    aud: authCodeRow.aud,
-    iss: env.AUTH_DOMAIN,
-  };
+  // Admin enrichment lives outside the if-block so the response logic
+  // (tenantIdFallback) can read primaryTenantId after the factory call.
+  let adminContexts: Record<string, string[]> = {};
+  let adminPrimaryTenantId: string | null = null;
 
-  // ── Admin token enrichment: add jti, contexts, primaryTenantId ──
+  // ── Admin token enrichment: compute contexts + primaryTenantId ──
   if (authCodeRow.aud === 'admin') {
     let memberships = await db.getAdminMemberships(user.id);
 
@@ -170,17 +172,14 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
       m => m.tenant_id === '__platform__' && m.context === 'platform' && m.sub_role === 'owner'
     );
 
-    let primaryTenantId: string | null;
-    const contexts: Record<string, string[]> = {};
-
     if (isPlatformOwner) {
       // Super admin: gets platform context, can switch tenants via API.
       // Build platform contexts from __platform__ memberships
       const platformMemberships = memberships.filter(m => m.tenant_id === '__platform__' && m.context === 'platform');
       for (const m of platformMemberships) {
-        if (!contexts['platform']) contexts['platform'] = [];
-        if (m.sub_role && !contexts['platform'].includes(m.sub_role)) {
-          contexts['platform'].push(m.sub_role);
+        if (!adminContexts['platform']) adminContexts['platform'] = [];
+        if (m.sub_role && !adminContexts['platform'].includes(m.sub_role)) {
+          adminContexts['platform'].push(m.sub_role);
         }
       }
 
@@ -191,15 +190,15 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
         m => m.tenant_id !== '__platform__' && m.tenant_id !== '__unknown__'
       );
       const realTenant = realTenants.find(m => m.context === 'seller' && m.sub_role === 'owner') ?? realTenants[0];
-      primaryTenantId = realTenant?.tenant_id ?? null;
+      adminPrimaryTenantId = realTenant?.tenant_id ?? null;
 
       // Also include contexts from the primary tenant if one exists
-      if (primaryTenantId) {
-        const tenantMemberships = memberships.filter(m => m.tenant_id === primaryTenantId);
+      if (adminPrimaryTenantId) {
+        const tenantMemberships = memberships.filter(m => m.tenant_id === adminPrimaryTenantId);
         for (const m of tenantMemberships) {
-          if (!contexts[m.context]) contexts[m.context] = [];
-          if (m.sub_role && !contexts[m.context].includes(m.sub_role)) {
-            contexts[m.context].push(m.sub_role);
+          if (!adminContexts[m.context]) adminContexts[m.context] = [];
+          if (m.sub_role && !adminContexts[m.context].includes(m.sub_role)) {
+            adminContexts[m.context].push(m.sub_role);
           }
         }
       }
@@ -207,20 +206,20 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
       // Prefer tenant where user has seller-owner, then any seller context, then any
       const ownerMembership = memberships.find(m => m.context === 'seller' && m.sub_role === 'owner');
       const sellerMembership = memberships.find(m => m.context === 'seller');
-      primaryTenantId = ownerMembership?.tenant_id ?? sellerMembership?.tenant_id ?? memberships[0]?.tenant_id ?? null;
+      adminPrimaryTenantId = ownerMembership?.tenant_id ?? sellerMembership?.tenant_id ?? memberships[0]?.tenant_id ?? null;
 
       // Build contexts map from memberships on the primary tenant only
-      const primaryMemberships = memberships.filter(m => m.tenant_id === primaryTenantId);
+      const primaryMemberships = memberships.filter(m => m.tenant_id === adminPrimaryTenantId);
       for (const m of primaryMemberships) {
-        if (!contexts[m.context]) contexts[m.context] = [];
-        if (m.sub_role && !contexts[m.context].includes(m.sub_role)) {
-          contexts[m.context].push(m.sub_role);
+        if (!adminContexts[m.context]) adminContexts[m.context] = [];
+        if (m.sub_role && !adminContexts[m.context].includes(m.sub_role)) {
+          adminContexts[m.context].push(m.sub_role);
         }
       }
     }
 
     // ── Optional tenantId override (admin SPA re-auth with stored selection) ──
-    if (requestedTenantId && requestedTenantId !== primaryTenantId) {
+    if (requestedTenantId && requestedTenantId !== adminPrimaryTenantId) {
       // Verify membership on requested tenant
       const hasAccess = isPlatformOwner || memberships.some(
         m => m.tenant_id === requestedTenantId && m.context !== 'customer',
@@ -228,37 +227,49 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
 
       if (hasAccess) {
         // Override primaryTenantId and rebuild contexts for the requested tenant
-        primaryTenantId = requestedTenantId;
+        adminPrimaryTenantId = requestedTenantId;
 
         // Clear and rebuild contexts
-        for (const key of Object.keys(contexts)) {
-          if (key !== 'platform') delete contexts[key];
+        for (const key of Object.keys(adminContexts)) {
+          if (key !== 'platform') delete adminContexts[key];
         }
         const tenantMemberships = memberships.filter(m => m.tenant_id === requestedTenantId);
         for (const m of tenantMemberships) {
-          if (!contexts[m.context]) contexts[m.context] = [];
-          if (m.sub_role && !contexts[m.context].includes(m.sub_role)) {
-            contexts[m.context].push(m.sub_role);
+          if (!adminContexts[m.context]) adminContexts[m.context] = [];
+          if (m.sub_role && !adminContexts[m.context].includes(m.sub_role)) {
+            adminContexts[m.context].push(m.sub_role);
           }
         }
       } else {
         console.warn(`Token exchange: tenantId hint '${requestedTenantId}' ignored — no membership for user ${user.id}`);
       }
     }
-
-    jwtPayload.jti = crypto.randomUUID();
-    jwtPayload.contexts = contexts;
-    jwtPayload.primaryTenantId = primaryTenantId;
   }
 
   // Track tenantIdFallback for response (must be declared outside admin block scope)
-  const responseTenantIdFallback = (authCodeRow.aud === 'admin' && requestedTenantId) ? (() => {
-    // Check if the requested tenant ended up as primaryTenantId
-    return jwtPayload.primaryTenantId !== requestedTenantId;
-  })() : false;
+  const responseTenantIdFallback = (authCodeRow.aud === 'admin' && requestedTenantId)
+    ? adminPrimaryTenantId !== requestedTenantId
+    : false;
+
+  // Build the unsigned payload via the right factory.
+  const unsignedPayload: UnsignedJwtClaims = authCodeRow.aud === 'admin'
+    ? buildAdminJwtPayload({
+        userId: user.id,
+        email: user.email,
+        name: user.name || '',
+        iss: env.AUTH_DOMAIN,
+        contexts: adminContexts,
+        primaryTenantId: adminPrimaryTenantId,
+      })
+    : buildCustomerJwtPayload({
+        userId: user.id,
+        email: user.email,
+        name: user.name || '',
+        iss: env.AUTH_DOMAIN,
+      });
 
   const accessToken = await signJwt(
-    jwtPayload as Parameters<typeof signJwt>[0],
+    unsignedPayload,
     env.JWT_PRIVATE_KEY,
     ttlSeconds
   );
