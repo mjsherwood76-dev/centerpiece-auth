@@ -34,6 +34,7 @@ import { AuthDB } from '../db.js';
 import {
   signJwt,
   sha256Hex,
+  sha256Base64Url,
   buildCustomerJwtPayload,
   buildAdminJwtPayload,
   type UnsignedJwtClaims,
@@ -305,17 +306,3 @@ function jsonError(message: string, status: number): Response {
   });
 }
 
-/**
- * Compute SHA-256 of a string and return as base64url (no padding).
- * Used for PKCE S256 verification: BASE64URL(SHA256(code_verifier)).
- */
-async function sha256Base64Url(data: string): Promise<string> {
-  const encoded = new TextEncoder().encode(data);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
-  const bytes = new Uint8Array(hashBuffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}

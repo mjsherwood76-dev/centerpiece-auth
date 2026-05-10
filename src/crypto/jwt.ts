@@ -356,3 +356,13 @@ export async function sha256Hex(data: string): Promise<string> {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 }
+
+/**
+ * Compute SHA-256 of a string and return as base64url (no padding).
+ * Used for PKCE S256 verification: BASE64URL(SHA256(code_verifier)).
+ */
+export async function sha256Base64Url(data: string): Promise<string> {
+  const encoded = new TextEncoder().encode(data);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+  return base64UrlEncodeBuffer(new Uint8Array(hashBuffer));
+}

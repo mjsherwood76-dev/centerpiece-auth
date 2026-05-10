@@ -8,6 +8,7 @@
  * Uses ES256 (ECDSA P-256) key pair.
  */
 import type { Env } from '../types.js';
+import { sha256Hex } from '../crypto/jwt.js';
 
 /** Cached JWK response per isolate (avoids re-importing on every request). */
 let cachedJwksResponse: { body: string; etag: string } | null = null;
@@ -88,12 +89,3 @@ function pemToArrayBuffer(pem: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-/**
- * SHA-256 hex digest for ETag generation.
- */
-async function sha256Hex(data: string): Promise<string> {
-  const encoded = new TextEncoder().encode(data);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-}
