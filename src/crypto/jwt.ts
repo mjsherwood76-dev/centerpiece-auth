@@ -12,7 +12,19 @@
 
 // ─── Types ──────────────────────────────────────────────────
 
-export interface JwtPayload {
+/**
+ * Canonical JWT claim shape issued by this auth Worker.
+ *
+ * Build via the factory functions below — `buildCustomerJwtPayload`,
+ * `buildAdminJwtPayload`, `buildImpersonationJwtPayload` — rather than
+ * hand-rolling the object at each issuer site.
+ *
+ * Note: `aud: 'storefront'` is the wire-level audience for end-customer
+ * tokens; the factory is named `buildCustomerJwtPayload` to match the
+ * platform's "customer" domain language while preserving the existing
+ * claim string (changing it would break refresh-token + auth_codes rows).
+ */
+export interface JwtClaims {
   sub: string; // userId
   email: string;
   name: string;
@@ -29,10 +41,101 @@ export interface JwtPayload {
   sessionType?: 'impersonation';   // marks this as an impersonation token
 }
 
+/**
+ * @deprecated Use `JwtClaims`. Retained as an alias so external imports keep compiling.
+ */
+export type JwtPayload = JwtClaims;
+
 export interface JwtHeader {
   alg: 'ES256';
   typ: 'JWT';
   kid: string;
+}
+
+// ─── Payload Factories ──────────────────────────────────────
+
+/**
+ * Unsigned JWT claim shape — what callers pass to `signJwt`.
+ * `iat` and `exp` are added by `signJwt` based on the supplied `ttlSeconds`.
+ */
+export type UnsignedJwtClaims = Omit<JwtClaims, 'iat' | 'exp'>;
+
+/** Identity fields shared by every issuer. */
+interface JwtIdentityInput {
+  userId: string;
+  email: string;
+  name: string;
+  iss: string;
+}
+
+/**
+ * Build an end-customer (`aud: 'storefront'`) JWT payload.
+ *
+ * Customer tokens carry no admin contexts, no jti, no primaryTenantId. The
+ * tenant is conveyed via the `iss` host in normal customer flows.
+ */
+export function buildCustomerJwtPayload(input: JwtIdentityInput): UnsignedJwtClaims {
+  return {
+    sub: input.userId,
+    email: input.email,
+    name: input.name,
+    aud: 'storefront',
+    iss: input.iss,
+  };
+}
+
+/**
+ * Build an admin (`aud: 'admin'`) JWT payload.
+ *
+ * Admin tokens always carry a fresh `jti` for targeted revocation, plus
+ * `contexts` and `primaryTenantId`. Pass `primaryTenantId: null` for
+ * platform admins with no current tenant scope.
+ */
+export function buildAdminJwtPayload(
+  input: JwtIdentityInput & {
+    contexts: Record<string, string[]>;
+    primaryTenantId: string | null;
+    jti?: string;
+  },
+): UnsignedJwtClaims {
+  return {
+    sub: input.userId,
+    email: input.email,
+    name: input.name,
+    aud: 'admin',
+    iss: input.iss,
+    jti: input.jti ?? crypto.randomUUID(),
+    contexts: input.contexts,
+    primaryTenantId: input.primaryTenantId,
+  };
+}
+
+/**
+ * Build an admin impersonation JWT payload (`aud: 'admin'`,
+ * `sessionType: 'impersonation'`).
+ *
+ * Impersonation tokens always carry `seller: ['owner']` context on the
+ * target tenant plus an `impersonatedBy` claim for audit + denylist.
+ */
+export function buildImpersonationJwtPayload(
+  input: JwtIdentityInput & {
+    tenantId: string;
+    impersonatedBy: string;
+    jti?: string;
+  },
+): UnsignedJwtClaims {
+  return {
+    sub: input.userId,
+    email: input.email,
+    name: input.name,
+    aud: 'admin',
+    iss: input.iss,
+    jti: input.jti ?? crypto.randomUUID(),
+    contexts: { seller: ['owner'] },
+    primaryTenantId: input.tenantId,
+    impersonatedBy: input.impersonatedBy,
+    sessionType: 'impersonation',
+  };
 }
 
 // ─── Key ID ─────────────────────────────────────────────────
