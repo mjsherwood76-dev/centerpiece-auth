@@ -23,6 +23,7 @@ import { sha256Hex } from '../crypto/jwt.js';
 import { hashPassword } from '../crypto/passwords.js';
 import { loadTenantBranding } from '../branding.js';
 import { sendPasswordChangedEmail } from '../email/send.js';
+import { parseRequestBody } from '../util/parseRequestBody.js';
 
 /**
  * Handle POST /api/reset-password
@@ -40,18 +41,7 @@ export async function handleResetPassword(request: Request, env: Env): Promise<R
   let tenantParam: string;
 
   try {
-    const contentType = request.headers.get('Content-Type') || '';
-    let body: Record<string, string>;
-
-    if (contentType.includes('application/json')) {
-      body = (await request.json()) as Record<string, string>;
-    } else {
-      const formData = await request.formData();
-      body = {} as Record<string, string>;
-      formData.forEach((value, key) => {
-        if (typeof value === 'string') body[key] = value;
-      });
-    }
+    const body = await parseRequestBody(request);
 
     token = (body.token || '').trim();
     newPassword = body.newPassword || body.password || '';
