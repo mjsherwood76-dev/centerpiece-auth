@@ -16,6 +16,7 @@ import type { Env } from '../types.js';
 import { signJwt } from '../crypto/jwt.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
+import { jsonResponse } from '../util/httpJson.js';
 
 const logger = new ConsoleJsonLogger();
 
@@ -121,13 +122,6 @@ export async function handleImpersonate(request: Request, env: Env): Promise<Res
 }
 
 // ─── Helpers ────────────────────────────────────────────────
-
-function jsonResponse(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  });
-}
 
 function constantTimeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;

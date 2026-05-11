@@ -31,6 +31,7 @@ import {
 } from '../crypto/refreshTokens.js';
 import { validateRedirectUrl } from '../security/redirectValidator.js';
 import { isAdminDomain } from '../security/platformDomains.js';
+import { parseRequestBody } from '../util/parseRequestBody.js';
 
 /**
  * Handle POST /api/login
@@ -51,18 +52,7 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   let codeChallenge: string;
 
   try {
-    const contentType = request.headers.get('Content-Type') || '';
-    let body: Record<string, string>;
-
-    if (contentType.includes('application/json')) {
-      body = await request.json() as Record<string, string>;
-    } else {
-      const formData = await request.formData();
-      body = {} as Record<string, string>;
-      formData.forEach((value, key) => {
-        if (typeof value === 'string') body[key] = value;
-      });
-    }
+    const body = await parseRequestBody(request);
 
     email = (body.email || '').trim().toLowerCase();
     password = body.password || '';

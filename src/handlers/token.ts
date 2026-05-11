@@ -32,6 +32,7 @@
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
 import { signJwt, sha256Hex } from '../crypto/jwt.js';
+import { jsonError } from '../util/httpJson.js';
 
 /**
  * Handle POST /api/token
@@ -286,13 +287,6 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
 }
 
 // ─── Helpers ────────────────────────────────────────────────
-
-function jsonError(message: string, status: number): Response {
-  return new Response(JSON.stringify({ error: message }), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  });
-}
 
 /**
  * Compute SHA-256 of a string and return as base64url (no padding).

@@ -23,6 +23,7 @@
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
 import { verifyJwt, signJwt } from '../crypto/jwt.js';
+import { jsonError } from '../util/httpJson.js';
 
 export async function handleSwitchTenant(request: Request, env: Env): Promise<Response> {
   // ── Extract and verify JWT ──
@@ -165,11 +166,3 @@ export async function handleSwitchTenant(request: Request, env: Env): Promise<Re
   );
 }
 
-// ─── Helpers ────────────────────────────────────────────────
-
-function jsonError(message: string, status: number): Response {
-  return new Response(JSON.stringify({ error: message }), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  });
-}

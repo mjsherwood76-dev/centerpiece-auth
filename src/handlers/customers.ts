@@ -16,6 +16,7 @@
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
 import { verifyJwt, type JwtPayload } from '../crypto/jwt.js';
+import { jsonResponse, jsonError } from '../util/httpJson.js';
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -51,19 +52,6 @@ interface CustomerDetailResponse {
   createdAt: string;
   emailVerified: boolean;
   status: string;
-}
-
-// ─── Helpers ────────────────────────────────────────────────
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  });
-}
-
-function jsonError(message: string, status: number): Response {
-  return jsonResponse({ error: message }, status);
 }
 
 // ─── Auth Verification ──────────────────────────────────────
