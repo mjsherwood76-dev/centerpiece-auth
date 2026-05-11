@@ -39,6 +39,7 @@ import {
   buildAdminJwtPayload,
   type UnsignedJwtClaims,
 } from '../crypto/jwt.js';
+import { jsonError } from '../util/httpJson.js';
 
 /**
  * Handle POST /api/token
@@ -295,14 +296,5 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
       },
     }
   );
-}
-
-// ─── Helpers ────────────────────────────────────────────────
-
-function jsonError(message: string, status: number): Response {
-  return new Response(JSON.stringify({ error: message }), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  });
 }
 

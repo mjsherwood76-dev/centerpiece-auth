@@ -17,6 +17,7 @@ import { signJwt, buildImpersonationJwtPayload } from '../crypto/jwt.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
 import { requireInternalSecret } from '../security/internalSecret.js';
+import { jsonResponse } from '../util/httpJson.js';
 
 const logger = new ConsoleJsonLogger();
 
@@ -109,14 +110,5 @@ export async function handleImpersonate(request: Request, env: Env): Promise<Res
     accessToken,
     expiresIn: IMPERSONATION_TTL_SECONDS,
   }, 200);
-}
-
-// ─── Helpers ────────────────────────────────────────────────
-
-function jsonResponse(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  });
 }
 
