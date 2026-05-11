@@ -45,6 +45,10 @@ function mockEnv(overrides: Record<string, unknown> = {}) {
     SENDGRID_API_KEY: 'SG.test-key',
     EMAIL_FROM: 'noreply@centerpiecelab.com',
     EMAIL_FROM_NAME: 'Centerpiece Lab',
+    // Session 1 — provider split: transactional SendGrid is operator-only.
+    // Default tests to allowed=true to preserve legacy SendGrid behaviour
+    // coverage; provider-split tests override to undefined/false.
+    ALLOW_TRANSACTIONAL_SENDGRID_ROLLBACK: 'true',
     ...overrides,
   } as any;
 }
@@ -635,5 +639,145 @@ describe('sendPasswordChangedEmail', () => {
     const parsed = JSON.parse(logEntry!);
     assert.equal(parsed.tenantId, 'tenant-abc');
     assert.equal(parsed.userId, 'user-123');
+  });
+});
+
+// ─── Session 1 — Fetch Service-Binding Path ─────────────────
+
+describe('platformApiClient — fetch service-binding bridge', () => {
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  it('calls binding.fetch() at the internal transactional send URL', async () => {
+    const { sendViaPlatformApi } = await import('../src/email/platformApiClient.js');
+
+    let capturedUrl: string | undefined;
+    let capturedInit: RequestInit | undefined;
+    const binding = {
+      fetch: async (input: Request | string, init?: RequestInit) => {
+        capturedUrl = typeof input === 'string' ? input : input.url;
+        capturedInit = init;
+        return new Response(JSON.stringify({ status: 'sent' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    };
+
+    const result = await sendViaPlatformApi(binding, {
+      templateId: 'welcome',
+      tenantId: 'tenant-1',
+      recipient: { email: 'user@example.com' },
+      variables: { customerName: 'User' },
+    });
+
+    assert.equal(result?.status, 'sent');
+    assert.ok(capturedUrl?.endsWith('/api/internal/email/transactional/send'),
+      `URL should hit internal route, got: ${capturedUrl}`);
+    assert.equal(capturedInit?.method, 'POST');
+    assert.ok(typeof capturedInit?.body === 'string');
+    const sentBody = JSON.parse(capturedInit!.body as string);
+    assert.equal(sentBody.templateId, 'welcome');
+    assert.equal(sentBody.tenantId, 'tenant-1');
+  });
+
+  it('returns skipped/platform_api_unreachable when binding fetch throws', async () => {
+    const { sendViaPlatformApi } = await import('../src/email/platformApiClient.js');
+
+    const binding = {
+      fetch: async () => { throw new Error('boom'); },
+    };
+
+    const result = await sendViaPlatformApi(binding, {
+      templateId: 'welcome',
+      tenantId: 'tenant-1',
+      recipient: { email: 'user@example.com' },
+      variables: {},
+    });
+
+    assert.equal(result?.status, 'skipped');
+    assert.equal(result?.reason, 'platform_api_unreachable');
+  });
+
+  it('returns null when no PLATFORM_API binding is configured', async () => {
+    const { sendViaPlatformApi } = await import('../src/email/platformApiClient.js');
+
+    const result = await sendViaPlatformApi(undefined, {
+      templateId: 'welcome',
+      tenantId: 'tenant-1',
+      recipient: { email: 'user@example.com' },
+      variables: {},
+    });
+
+    assert.equal(result, null);
+  });
+});
+
+// ─── Session 1 — Provider Split (no normal SendGrid fallback) ──
+
+describe('sendPasswordResetEmail — provider split', () => {
+  afterEach(() => {
+    globalThis.fetch = _originalFetch;
+    console.log = _originalConsoleLog;
+    mock.restoreAll();
+  });
+
+  it('skips with transactional_sendgrid_disabled when rollback flag is absent and no PLATFORM_API binding', async () => {
+    let fetchCalled = false;
+    mock.method(globalThis, 'fetch', async () => {
+      fetchCalled = true;
+      return new Response(null, { status: 202 });
+    });
+
+    const logs: string[] = [];
+    mock.method(console, 'log', (msg: string) => logs.push(msg));
+
+    await sendPasswordResetEmail(
+      mockEnv({ ALLOW_TRANSACTIONAL_SENDGRID_ROLLBACK: undefined }),
+      'user@example.com',
+      'https://auth.test/reset',
+      mockBranding,
+    );
+
+    assert.equal(fetchCalled, false, 'SendGrid fetch must not run when rollback flag is off');
+    const logEntry = logs.find(l => l.includes('email.skipped'));
+    assert.ok(logEntry, 'Should log email.skipped');
+    const parsed = JSON.parse(logEntry!);
+    assert.equal(parsed.reason, 'transactional_sendgrid_disabled');
+  });
+
+  it('uses PLATFORM_API fetch bridge when binding is configured', async () => {
+    let sendgridCalled = false;
+    mock.method(globalThis, 'fetch', async () => {
+      sendgridCalled = true;
+      return new Response(null, { status: 202 });
+    });
+
+    let bindingFetchCalled = false;
+    const binding = {
+      fetch: async () => {
+        bindingFetchCalled = true;
+        return new Response(JSON.stringify({ status: 'sent' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    };
+
+    const logs: string[] = [];
+    mock.method(console, 'log', (msg: string) => logs.push(msg));
+
+    await sendPasswordResetEmail(
+      mockEnv({ PLATFORM_API: binding, ALLOW_TRANSACTIONAL_SENDGRID_ROLLBACK: undefined }),
+      'user@example.com',
+      'https://auth.test/reset',
+      mockBranding,
+    );
+
+    assert.equal(bindingFetchCalled, true, 'PLATFORM_API binding fetch should be called');
+    assert.equal(sendgridCalled, false, 'SendGrid must not be called when PLATFORM_API returns sent');
+    const logEntry = logs.find(l => l.includes('email.sent'));
+    assert.ok(logEntry, 'Should log email.sent');
   });
 });

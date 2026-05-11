@@ -13,7 +13,16 @@ export interface Env {
   TENANT_CONFIGS: KVNamespace;
 
   // Service Bindings
+  // PLATFORM_API is a fetch-capable Cloudflare Worker service binding to
+  // centerpiece-platform-api. Auth calls the internal transactional email
+  // route via `binding.fetch()` — see src/email/platformApiClient.ts.
   PLATFORM_API?: import('./email/platformApiClient.js').PlatformApiEmailBinding;
+
+  // Operator-only emergency rollback flag for the transactional SendGrid
+  // fallback path. The provider split (Phase 3.10) requires Cloudflare
+  // Email Sending via platform-api for transactional email; SendGrid is
+  // only reachable when this is explicitly set to 'true'.
+  ALLOW_TRANSACTIONAL_SENDGRID_ROLLBACK?: string;
 
   // Environment variables
   ENVIRONMENT: string;

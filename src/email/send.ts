@@ -93,6 +93,17 @@ async function tryTemplateRenderer(
   }
 }
 
+/**
+ * Operator-only emergency rollback gate for the legacy transactional
+ * SendGrid path. The provider split (Phase 3.10) requires transactional
+ * email to use Cloudflare Email Sending via platform-api. SendGrid is only
+ * reachable here if the operator has explicitly set the env flag.
+ */
+function isSendGridRollbackAllowed(env: Env): boolean {
+  const flag = (env as unknown as { ALLOW_TRANSACTIONAL_SENDGRID_ROLLBACK?: string }).ALLOW_TRANSACTIONAL_SENDGRID_ROLLBACK;
+  return flag === 'true';
+}
+
 // ─── Send Functions ─────────────────────────────────────────
 
 /**
@@ -134,6 +145,18 @@ export async function sendPasswordResetEmail(
     return;
   }
 
+  if (!isSendGridRollbackAllowed(env)) {
+    logEmailEvent(logger, correlationId, {
+      event: 'email.skipped',
+      type: emailType,
+      to: redacted,
+      reason: 'transactional_sendgrid_disabled',
+      tenantId: context?.tenantId,
+      userId: context?.userId,
+    });
+    return;
+  }
+
   if (!env.SENDGRID_API_KEY) {
     logEmailEvent(logger, correlationId, {
       event: 'email.skipped',
@@ -145,6 +168,12 @@ export async function sendPasswordResetEmail(
     });
     return;
   }
+
+  console.log(JSON.stringify({
+    event: 'email.provider_split_rollback',
+    type: emailType,
+    reason: 'transactional_sendgrid_rollback_active',
+  }));
 
   try {
     const emailBranding = buildEmailBranding(branding);
@@ -238,6 +267,18 @@ export async function sendWelcomeEmail(
     return;
   }
 
+  if (!isSendGridRollbackAllowed(env)) {
+    logEmailEvent(logger, correlationId, {
+      event: 'email.skipped',
+      type: emailType,
+      to: redacted,
+      reason: 'transactional_sendgrid_disabled',
+      tenantId: context?.tenantId,
+      userId: context?.userId,
+    });
+    return;
+  }
+
   if (!env.SENDGRID_API_KEY) {
     logEmailEvent(logger, correlationId, {
       event: 'email.skipped',
@@ -249,6 +290,12 @@ export async function sendWelcomeEmail(
     });
     return;
   }
+
+  console.log(JSON.stringify({
+    event: 'email.provider_split_rollback',
+    type: emailType,
+    reason: 'transactional_sendgrid_rollback_active',
+  }));
 
   try {
     const emailBranding = buildEmailBranding(branding);
@@ -337,6 +384,18 @@ export async function sendPasswordChangedEmail(
     return;
   }
 
+  if (!isSendGridRollbackAllowed(env)) {
+    logEmailEvent(logger, correlationId, {
+      event: 'email.skipped',
+      type: emailType,
+      to: redacted,
+      reason: 'transactional_sendgrid_disabled',
+      tenantId: context?.tenantId,
+      userId: context?.userId,
+    });
+    return;
+  }
+
   if (!env.SENDGRID_API_KEY) {
     logEmailEvent(logger, correlationId, {
       event: 'email.skipped',
@@ -348,6 +407,12 @@ export async function sendPasswordChangedEmail(
     });
     return;
   }
+
+  console.log(JSON.stringify({
+    event: 'email.provider_split_rollback',
+    type: emailType,
+    reason: 'transactional_sendgrid_rollback_active',
+  }));
 
   try {
     const emailBranding = buildEmailBranding(branding);
