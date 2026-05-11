@@ -251,6 +251,8 @@ export async function sendWelcomeEmail(
     recipient: { email: to, name: userName },
     variables: {
       customerName: userName || 'there',
+      customerFirstName: (userName || 'there').split(' ')[0],
+      accountUrl: loginUrl,
       signInUrl: loginUrl,
     },
     idempotencyKey: context?.userId ? `auth:${context.userId}:welcome` : undefined,
@@ -363,12 +365,17 @@ export async function sendPasswordChangedEmail(
   const logger = context?.logger ?? null;
   const correlationId = context?.correlationId ?? 'unknown';
 
+  const now = new Date();
+  const changeDate = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const changeTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
   const templateResult = await tryTemplateRenderer(env, {
     templateId: 'password-changed',
     tenantId: context?.tenantId ?? branding.tenantId,
     recipient: { email: to },
     variables: {
       customerName: to.split('@')[0] || 'there',
+      changeDate,
+      changeTime,
       signInUrl: forgotPasswordUrl.replace('/forgot-password', '/login'),
     },
   });
