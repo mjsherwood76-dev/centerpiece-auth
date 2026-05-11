@@ -13,21 +13,8 @@
  */
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
+import { requireInternalSecret } from '../security/internalSecret.js';
 import { jsonResponse } from '../util/httpJson.js';
-
-// ─── Helpers ────────────────────────────────────────────────
-
-/**
- * Constant-time string comparison to prevent timing attacks.
- */
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}
 
 // ─── Handler ────────────────────────────────────────────────
 
@@ -41,15 +28,8 @@ function constantTimeEqual(a: string, b: string): boolean {
  */
 export async function handleInternalUserLookup(request: Request, env: Env): Promise<Response> {
   // ── Verify internal secret ──
-  const internalSecret = env.INTERNAL_SECRET;
-  if (!internalSecret) {
-    return jsonResponse({ error: 'Internal endpoint not configured' }, 503);
-  }
-
-  const providedSecret = request.headers.get('X-CP-Internal-Secret') || '';
-  if (!constantTimeEqual(providedSecret, internalSecret)) {
-    return jsonResponse({ error: 'Forbidden' }, 403);
-  }
+  const denied = requireInternalSecret(request, env);
+  if (denied) return denied;
 
   // ── Parse query parameter ──
   const url = new URL(request.url);

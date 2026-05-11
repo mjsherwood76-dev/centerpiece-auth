@@ -13,9 +13,10 @@
  * - Caller must pass their userId, contexts, and reason for audit
  */
 import type { Env } from '../types.js';
-import { signJwt } from '../crypto/jwt.js';
+import { signJwt, buildImpersonationJwtPayload } from '../crypto/jwt.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
+import { requireInternalSecret } from '../security/internalSecret.js';
 import { jsonResponse } from '../util/httpJson.js';
 
 const logger = new ConsoleJsonLogger();
@@ -35,15 +36,8 @@ interface ImpersonateRequest {
 
 export async function handleImpersonate(request: Request, env: Env): Promise<Response> {
   // ── Validate internal secret ──
-  const internalSecret = env.INTERNAL_SECRET;
-  if (!internalSecret) {
-    return jsonResponse({ error: 'Internal endpoint not configured' }, 503);
-  }
-
-  const providedSecret = request.headers.get('X-CP-Internal-Secret') || '';
-  if (!constantTimeEqual(providedSecret, internalSecret)) {
-    return jsonResponse({ error: 'Forbidden' }, 403);
-  }
+  const denied = requireInternalSecret(request, env);
+  if (denied) return denied;
 
   // ── Parse body ──
   let body: ImpersonateRequest;
@@ -80,20 +74,17 @@ export async function handleImpersonate(request: Request, env: Env): Promise<Res
   // The admin gets seller:owner context on the target tenant,
   // plus the impersonatedBy + sessionType claims for audit/denylist.
   const accessToken = await signJwt(
-    {
-      sub: userId,
+    buildImpersonationJwtPayload({
+      userId,
       email,
       name: name || '',
-      aud: 'admin' as const,
       iss: env.AUTH_DOMAIN,
-      jti: crypto.randomUUID(),
-      contexts: {
-        seller: ['owner'],
-      },
-      primaryTenantId: tenantId,
+      tenantId,
+      // Preserves existing behaviour: admin's own userId is the audit marker
+      // for who initiated the impersonation. (See AUTH-7 follow-up if this
+      // ever needs to diverge from `sub`.)
       impersonatedBy: userId,
-      sessionType: 'impersonation',
-    },
+    }),
     env.JWT_PRIVATE_KEY,
     IMPERSONATION_TTL_SECONDS,
   );
@@ -121,13 +112,3 @@ export async function handleImpersonate(request: Request, env: Env): Promise<Res
   }, 200);
 }
 
-// ─── Helpers ────────────────────────────────────────────────
-
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}

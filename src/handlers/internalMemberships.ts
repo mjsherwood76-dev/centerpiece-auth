@@ -21,6 +21,7 @@ import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
+import { requireInternalSecret } from '../security/internalSecret.js';
 import { jsonResponse } from '../util/httpJson.js';
 
 const logger = new ConsoleJsonLogger();
@@ -42,38 +43,6 @@ interface DeleteMembershipRequest {
   subRole: string;
 }
 
-// ─── Helpers ────────────────────────────────────────────────
-
-/**
- * Constant-time string comparison to prevent timing attacks.
- * Uses byte-by-byte XOR to ensure comparison time is independent of match position.
- */
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}
-
-/**
- * Validate the X-CP-Internal-Secret header.
- * Returns a Response if validation fails, or null if the secret is valid.
- */
-function validateInternalSecret(request: Request, env: Env): Response | null {
-  const internalSecret = env.INTERNAL_SECRET;
-  if (!internalSecret) {
-    return jsonResponse({ error: 'Internal endpoint not configured' }, 503);
-  }
-
-  const providedSecret = request.headers.get('X-CP-Internal-Secret') || '';
-  if (!constantTimeEqual(providedSecret, internalSecret)) {
-    return jsonResponse({ error: 'Forbidden' }, 403);
-  }
-
-  return null; // Secret is valid
-}
 
 // ─── Context-SubRole Validation ───────────────────────────────────
 
@@ -332,8 +301,8 @@ async function handleGetOwnerCount(request: Request, env: Env): Promise<Response
  */
 export async function handleInternalMemberships(request: Request, env: Env): Promise<Response> {
   // ── Verify internal secret (shared across all methods) ──
-  const secretError = validateInternalSecret(request, env);
-  if (secretError) return secretError;
+  const denied = requireInternalSecret(request, env);
+  if (denied) return denied;
 
   const method = request.method;
   const url = new URL(request.url);
