@@ -36,7 +36,6 @@ preview_id = "ee5142299d73451bbf76481b8b4d0c60"
 [[services]]
 binding = "PLATFORM_API"
 service = "centerpiece-platform-api"
-entrypoint = "PlatformApiService"
 
 # Environment Variables
 [vars]
@@ -101,7 +100,6 @@ id = "ee5142299d73451bbf76481b8b4d0c60"
 [[env.staging.services]]
 binding = "PLATFORM_API"
 service = "centerpiece-platform-api-staging"
-entrypoint = "PlatformApiService"
 
 # Custom domain route — auth.centerpiecelab.com
 # Routes all auth traffic for the platform domain to this Worker.

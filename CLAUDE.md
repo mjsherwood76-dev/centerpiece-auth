@@ -61,7 +61,7 @@ migrations/                    # D1 schema (0001_initial_schema.sql, …)
 
 **D1**: `AUTH_DB` (`centerpiece-auth-db`), `TENANTS_DB` (read-only — name/domain lookups)
 **KV**: `CANONICAL_INPUTS` (read-only), `TENANT_CONFIGS` (read-only)
-**Service Binding**: `PLATFORM_API` (entrypoint `PlatformApiService`)
+**Service Binding**: `PLATFORM_API` (fetch-style; routes to platform-api main fetch handler — internal route at `/api/internal/email/transactional/send`)
 
 **Vars**: `ENVIRONMENT`, `AUTH_DOMAIN`, `EMAIL_FROM=noreply@centerpiecelab.com`, `EMAIL_FROM_NAME=Centerpiece Lab`, `ACCESS_TOKEN_TTL_SECONDS=900` (15 min), `REFRESH_TOKEN_TTL_DAYS=30`, `AUTH_CODE_TTL_SECONDS=60`.
 
