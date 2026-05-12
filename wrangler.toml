@@ -46,6 +46,10 @@ EMAIL_FROM_NAME = "Centerpiece Lab"
 ACCESS_TOKEN_TTL_SECONDS = "900"
 REFRESH_TOKEN_TTL_DAYS = "30"
 AUTH_CODE_TTL_SECONDS = "60"
+# Tenant id used for transactional emails sent outside any tenant storefront
+# context (e.g. platform-admin password reset on hub.centerpiecelab.com).
+# Must reference an existing row in TENANTS_DB.tenants.
+PLATFORM_TENANT_ID = "centerpiecelab-production"
 
 # Secrets (set via `wrangler secret put`):
 #   JWT_PRIVATE_KEY  — ES256 PEM private key, base64-encoded
@@ -77,7 +81,7 @@ workers_dev = true
 # Override top-level routes so staging does NOT claim auth.centerpiecelab.com
 # (production-only route). Staging uses *.workers.dev via workers_dev = true.
 routes = []
-vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://centerpiece-auth-staging.mjsherwood76.workers.dev", EMAIL_FROM = "noreply@centerpiecelab.com", EMAIL_FROM_NAME = "Centerpiece Lab", ACCESS_TOKEN_TTL_SECONDS = "900", REFRESH_TOKEN_TTL_DAYS = "30", AUTH_CODE_TTL_SECONDS = "60" }
+vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://centerpiece-auth-staging.mjsherwood76.workers.dev", EMAIL_FROM = "noreply@centerpiecelab.com", EMAIL_FROM_NAME = "Centerpiece Lab", ACCESS_TOKEN_TTL_SECONDS = "900", REFRESH_TOKEN_TTL_DAYS = "30", AUTH_CODE_TTL_SECONDS = "60", PLATFORM_TENANT_ID = "centerpiecelab-staging" }
 
 [[env.staging.d1_databases]]
 binding = "AUTH_DB"

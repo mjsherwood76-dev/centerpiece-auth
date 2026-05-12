@@ -27,7 +27,7 @@ export async function handleResetPasswordPage(request: Request, env: Env): Promi
   const branding = await loadTenantBranding(tenant, env);
 
   const body = token
-    ? renderNewPasswordForm(env, tenant, token, error)
+    ? renderNewPasswordForm(env, tenant, token, redirect, error)
     : renderForgotPasswordForm(env, tenant, redirect, error);
 
   const pageTitle = token ? 'Reset Password' : 'Forgot Password';
@@ -87,6 +87,7 @@ function renderNewPasswordForm(
   env: Env,
   tenant: string | null,
   token: string,
+  redirect: string,
   error: string | null
 ): string {
   const clientScript = `
@@ -129,6 +130,7 @@ function renderNewPasswordForm(
     <form class="auth-form" method="POST" action="${escapeAttr(env.AUTH_DOMAIN)}/api/reset-password" id="reset-form">
       <input type="hidden" name="token" value="${escapeAttr(token)}">
       <input type="hidden" name="tenant" value="${escapeAttr(tenant || '')}">
+      <input type="hidden" name="redirect" value="${escapeAttr(redirect)}">
 
       <div class="form-group">
         <label class="form-label" for="newPassword">New Password</label>

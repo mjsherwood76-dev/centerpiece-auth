@@ -70,10 +70,21 @@ export async function handleForgotPassword(request: Request, env: Env): Promise<
     });
 
     // ── Send password reset email ──
-    const resetUrl = `${env.AUTH_DOMAIN}/reset-password?token=${resetToken}&tenant=${encodeURIComponent(tenantParam)}`;
-    const branding = await loadTenantBranding(tenantParam || null, env);
+    // Outside a tenant storefront context (platform-admin password reset),
+    // tenantParam is empty. Fall back to PLATFORM_TENANT_ID so the
+    // transactional renderer can resolve a real tenant row and brand the
+    // email under the platform's own identity.
+    const effectiveTenantId = tenantParam || env.PLATFORM_TENANT_ID;
+    // Preserve the original redirect target through the email round-trip so
+    // we can return the user to the right app (admin SPA or storefront) after
+    // they set a new password. PKCE state cannot survive the round-trip, so
+    // we land them at the redirect's origin, where the app re-initiates a
+    // fresh login flow with its own PKCE.
+    const redirectQuery = redirectUrl ? `&redirect=${encodeURIComponent(redirectUrl)}` : '';
+    const resetUrl = `${env.AUTH_DOMAIN}/reset-password?token=${resetToken}&tenant=${encodeURIComponent(tenantParam)}${redirectQuery}`;
+    const branding = await loadTenantBranding(effectiveTenantId || null, env);
     await sendPasswordResetEmail(env, user.email, resetUrl, branding, {
-      tenantId: tenantParam || undefined,
+      tenantId: effectiveTenantId,
       userId: user.id,
     });
   }

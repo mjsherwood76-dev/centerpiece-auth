@@ -24,6 +24,7 @@ import { hashPassword } from '../crypto/passwords.js';
 import { loadTenantBranding } from '../branding.js';
 import { sendPasswordChangedEmail } from '../email/send.js';
 import { parseRequestBody } from '../util/parseRequestBody.js';
+import { validateRedirectUrl } from '../security/redirectValidator.js';
 
 /**
  * Handle POST /api/reset-password
@@ -39,6 +40,7 @@ export async function handleResetPassword(request: Request, env: Env): Promise<R
   let newPassword: string;
   let confirmPassword: string;
   let tenantParam: string;
+  let redirectUrl: string;
 
   try {
     const body = await parseRequestBody(request);
@@ -47,6 +49,7 @@ export async function handleResetPassword(request: Request, env: Env): Promise<R
     newPassword = body.newPassword || body.password || '';
     confirmPassword = body.confirmPassword || body.password || '';
     tenantParam = (body.tenant || '').trim();
+    redirectUrl = (body.redirect || '').trim();
   } catch {
     return errorRedirect(env, '', 'invalid_token');
   }
@@ -91,15 +94,37 @@ export async function handleResetPassword(request: Request, env: Env): Promise<R
   // ── Send password-changed notification (non-blocking) ──
   const user = await db.getUserById(resetRow.user_id);
   if (user) {
-    const branding = await loadTenantBranding(tenantParam || null, env);
+    // Same fallback as /api/forgot-password: outside a tenant storefront
+    // context, route the transactional render to PLATFORM_TENANT_ID.
+    const effectiveTenantId = tenantParam || env.PLATFORM_TENANT_ID;
+    const branding = await loadTenantBranding(effectiveTenantId || null, env);
     const forgotPasswordUrl = `${env.AUTH_DOMAIN}/forgot-password?tenant=${encodeURIComponent(tenantParam)}`;
     await sendPasswordChangedEmail(env, user.email, branding, forgotPasswordUrl, {
-      tenantId: tenantParam || undefined,
+      tenantId: effectiveTenantId,
       userId: resetRow.user_id,
     });
   }
 
-  // ── Redirect to login with success message ──
+  // ── Redirect ──
+  // If the original request carried a `redirect` (admin SPA or storefront
+  // callback), send the user back to that app's *origin* after a successful
+  // reset. PKCE state can't survive the email round-trip, so the destination
+  // app re-initiates a fresh login flow with new PKCE. If `redirect` is
+  // absent or fails validation, fall back to the auth login page with the
+  // success message.
+  if (redirectUrl) {
+    const validation = await validateRedirectUrl(redirectUrl, env.TENANT_CONFIGS, env.ENVIRONMENT);
+    if (validation.valid) {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: validation.origin,
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+  }
+
   const params = new URLSearchParams();
   if (tenantParam) params.set('tenant', tenantParam);
   params.set('message', 'password_changed');

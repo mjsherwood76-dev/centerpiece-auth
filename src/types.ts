@@ -31,6 +31,11 @@ export interface Env {
   REFRESH_TOKEN_TTL_DAYS: string;
   AUTH_CODE_TTL_SECONDS: string;
 
+  // Tenant id used for transactional emails sent outside any tenant storefront
+  // context (platform-admin password reset on hub.centerpiecelab.com). Must
+  // reference an existing row in TENANTS_DB.tenants.
+  PLATFORM_TENANT_ID: string;
+
   // Secrets (JWT signing)
   JWT_PRIVATE_KEY: string;   // Base64-encoded ES256 PEM private key
   JWT_PUBLIC_KEY: string;    // Base64-encoded ES256 PEM public key
