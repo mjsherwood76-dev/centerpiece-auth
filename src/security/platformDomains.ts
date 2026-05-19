@@ -1,10 +1,13 @@
 /**
  * Hostnames that serve the Centerpiece admin console.
  * Used to determine audience ('admin' vs 'storefront') during auth flows.
+ *
+ * Note: `staging.centerpiecelab.com` was the legacy staging admin custom domain;
+ * it was decommissioned 2026-05-18 (Fix_Staging_Zone_Separation). Staging admin
+ * now lives exclusively at `centerpiece-platform-ui-staging.pages.dev`.
  */
 export const ADMIN_DOMAINS: readonly string[] = [
   'hub.centerpiecelab.com',
-  'staging.centerpiecelab.com',
   'centerpiece-platform-ui-staging.pages.dev',
 ];
 
