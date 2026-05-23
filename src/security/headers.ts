@@ -64,8 +64,12 @@ export function addSecurityHeaders(
           "default-src 'self'",
           // Allow inline styles for CSS variables and theme injection
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-          // Allow inline scripts for FOUC prevention and dark mode toggle
-          "script-src 'self' 'unsafe-inline'",
+          // Allow inline scripts for FOUC prevention and dark mode toggle.
+          // static.cloudflareinsights.com hosts the Web Analytics beacon that
+          // Cloudflare auto-injects when zone-level Web Analytics is enabled —
+          // without this allowance the browser blocks the beacon and emits a
+          // CSP-violation log every page load.
+          "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com",
           "font-src 'self' https://fonts.gstatic.com",
           // Allow images from any https source (tenant logos, avatars)
           "img-src 'self' https: data:",
@@ -78,8 +82,10 @@ export function addSecurityHeaders(
           "frame-ancestors 'none'",
           // Base URI restriction
           "base-uri 'self'",
-          // Connect to auth domain APIs
-          "connect-src 'self'",
+          // Connect to auth domain APIs + CF Web Analytics beacon
+          // (cloudflareinsights.com is the POST target for the auto-injected
+          // beacon when zone Web Analytics is enabled).
+          "connect-src 'self' https://cloudflareinsights.com",
         ].join('; ')
       );
     }
