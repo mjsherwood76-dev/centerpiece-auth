@@ -4,10 +4,12 @@
  *
  * Note: `staging.centerpiecelab.com` was the legacy staging admin custom domain;
  * it was decommissioned 2026-05-18 (Fix_Staging_Zone_Separation). Staging admin
- * now lives exclusively at `centerpiece-platform-ui-staging.pages.dev`.
+ * now lives at `hub.centerpiecelab.dev` (custom domain) and
+ * `centerpiece-platform-ui-staging.pages.dev` (fallback).
  */
 export const ADMIN_DOMAINS: readonly string[] = [
   'hub.centerpiecelab.com',
+  'hub.centerpiecelab.dev',
   'centerpiece-platform-ui-staging.pages.dev',
 ];
 
@@ -27,6 +29,7 @@ export const CONTROLLED_SUFFIXES: readonly string[] = [
   '.centerpiece.app',
   '.centerpiece.io',
   '.centerpiecelab.com',
+  '.centerpiecelab.dev',
   '.workers.dev',
   '.pages.dev',
 ];
