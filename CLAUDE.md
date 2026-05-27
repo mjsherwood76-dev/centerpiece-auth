@@ -70,7 +70,7 @@ migrations/                    # D1 schema (0001_initial_schema.sql, …)
 ## Routes
 
 Production: `auth.centerpiecelab.com/*` on zone `centerpiecelab.com`.
-Staging: `routes = []` → `*.workers.dev`.
+Staging: `auth.centerpiecelab.dev/*` on zone `centerpiecelab.dev` (`[[env.staging.routes]]`). `centerpiece-auth-staging.mjsherwood76.workers.dev` remains active as fallback (`workers_dev = true`). See workspace `ARCHITECTURE.md` § Workers (Staging) for the platform-wide `.dev` zone map.
 
 ## Deploy rules
 
