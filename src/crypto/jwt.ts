@@ -36,6 +36,10 @@ export interface JwtClaims {
   jti?: string;                    // unique token ID (UUID) — enables targeted revocation
   contexts?: Record<string, string[]>; // e.g., { seller: ['owner'] } — scoped to primaryTenantId tenant
   primaryTenantId?: string | null; // first active non-customer membership tenant
+  // login_iat: Unix timestamp of the original login event. Preserved across silent refreshes
+  // so that step-up auth and idle-timeout checks can distinguish "just logged in" from
+  // "has an active session". Present on admin tokens only; omitted for storefront/impersonation.
+  login_iat?: number;
   // Impersonation claims (present only on impersonation tokens)
   impersonatedBy?: string;         // admin userId who initiated impersonation
   sessionType?: 'impersonation';   // marks this as an impersonation token
@@ -90,15 +94,21 @@ export function buildCustomerJwtPayload(input: JwtIdentityInput): UnsignedJwtCla
  * Admin tokens always carry a fresh `jti` for targeted revocation, plus
  * `contexts` and `primaryTenantId`. Pass `primaryTenantId: null` for
  * platform admins with no current tenant scope.
+ *
+ * `loginIat` is the Unix timestamp of the original login event, sourced from
+ * `refresh_tokens.login_iat` (added by migration 0007). It is preserved across
+ * silent refreshes so step-up auth and idle-timeout checks can distinguish
+ * "just logged in" from "has an active session".
  */
 export function buildAdminJwtPayload(
   input: JwtIdentityInput & {
     contexts: Record<string, string[]>;
     primaryTenantId: string | null;
     jti?: string;
+    loginIat?: number;
   },
 ): UnsignedJwtClaims {
-  return {
+  const payload: UnsignedJwtClaims = {
     sub: input.userId,
     email: input.email,
     name: input.name,
@@ -108,6 +118,10 @@ export function buildAdminJwtPayload(
     contexts: input.contexts,
     primaryTenantId: input.primaryTenantId,
   };
+  if (input.loginIat !== undefined) {
+    payload.login_iat = input.loginIat;
+  }
+  return payload;
 }
 
 /**
@@ -178,6 +192,7 @@ export async function signJwt(
   if (payload.jti !== undefined) fullPayload.jti = payload.jti;
   if (payload.contexts !== undefined) fullPayload.contexts = payload.contexts;
   if (payload.primaryTenantId !== undefined) fullPayload.primaryTenantId = payload.primaryTenantId;
+  if (payload.login_iat !== undefined) fullPayload.login_iat = payload.login_iat;
   if (payload.impersonatedBy !== undefined) fullPayload.impersonatedBy = payload.impersonatedBy;
   if (payload.sessionType !== undefined) fullPayload.sessionType = payload.sessionType;
 

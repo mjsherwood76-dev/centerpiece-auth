@@ -254,6 +254,20 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
     ? adminPrimaryTenantId !== requestedTenantId
     : false;
 
+  // For admin tokens: read login_iat from the refresh_tokens row referenced by
+  // auth_codes.refresh_token_id (added by migration 0007). login_iat is the Unix
+  // timestamp of the original login event, preserved across silent-refresh rotations.
+  let loginIat: number | undefined;
+  if (authCodeRow.aud === 'admin' && authCodeRow.refresh_token_id) {
+    const rtRow = await db.raw<{ login_iat: number }>(
+      'SELECT login_iat FROM refresh_tokens WHERE id = ?',
+      [authCodeRow.refresh_token_id]
+    );
+    if (rtRow && rtRow.login_iat > 0) {
+      loginIat = rtRow.login_iat;
+    }
+  }
+
   // Build the unsigned payload via the right factory.
   const unsignedPayload: UnsignedJwtClaims = authCodeRow.aud === 'admin'
     ? buildAdminJwtPayload({
@@ -266,6 +280,7 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
         // Pass the refresh_token.id as jti so S4's "Current device" badge can
         // match the JWT's jti against the active refresh_tokens row id.
         jti: authCodeRow.refresh_token_id ?? undefined,
+        loginIat,
       })
     : buildCustomerJwtPayload({
         userId: user.id,

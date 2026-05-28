@@ -75,8 +75,14 @@ export async function hashAuthCode(code: string): Promise<string> {
  *
  * Cookie properties:
  * - HttpOnly: prevents JavaScript access
- * - Secure: HTTPS only
- * - SameSite=Lax: works with top-level redirect refresh pattern
+ * - Secure: HTTPS only (omitted on localhost)
+ * - SameSite=None; Partitioned: CHIPS partitioned cookie — required so the
+ *   cookie is sent on cross-site iframe requests from hub.centerpiecelab.com
+ *   (or hub.centerpiecelab.dev) to auth.centerpiecelab.com. SameSite=Lax
+ *   blocks cookies on iframe subresource requests in all modern browsers,
+ *   breaking the silent-refresh iframe handshake. Partitioned partitions the
+ *   cookie storage per top-level site, which is a security upgrade over
+ *   unpartitioned SameSite=None.
  * - Path=/: accessible across all auth domain paths
  *
  * @param token - Plaintext refresh token
@@ -93,24 +99,29 @@ export function buildRefreshCookieHeader(
   // Extract domain for cookie scope (remove protocol)
   const domain = new URL(authDomain).hostname;
 
-  // In development (localhost), omit Domain and Secure attributes
+  // In development (localhost), omit Domain, Secure, and Partitioned attributes.
+  // Partitioned requires Secure; SameSite=None requires Secure — neither applies locally.
   const isLocalhost = domain === 'localhost' || domain === '127.0.0.1';
-  const securePart = isLocalhost ? '' : '; Secure';
-  const domainPart = isLocalhost ? '' : `; Domain=${domain}`;
+  if (isLocalhost) {
+    return `cp_refresh=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSeconds}`;
+  }
 
-  return `cp_refresh=${token}; HttpOnly${securePart}; SameSite=Lax; Path=/; Max-Age=${maxAgeSeconds}${domainPart}`;
+  return `cp_refresh=${token}; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=${maxAgeSeconds}; Domain=${domain}`;
 }
 
 /**
  * Build a Set-Cookie header to clear the refresh token cookie.
+ * Must mirror the SameSite/Secure/Partitioned attributes of buildRefreshCookieHeader
+ * so browsers recognise it as the same cookie.
  */
 export function buildClearRefreshCookieHeader(authDomain: string): string {
   const domain = new URL(authDomain).hostname;
   const isLocalhost = domain === 'localhost' || domain === '127.0.0.1';
-  const securePart = isLocalhost ? '' : '; Secure';
-  const domainPart = isLocalhost ? '' : `; Domain=${domain}`;
+  if (isLocalhost) {
+    return `cp_refresh=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
+  }
 
-  return `cp_refresh=; HttpOnly${securePart}; SameSite=Lax; Path=/; Max-Age=0${domainPart}`;
+  return `cp_refresh=; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=0; Domain=${domain}`;
 }
 
 /**

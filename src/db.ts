@@ -315,6 +315,11 @@ export class AuthDB {
   /**
    * Rotate a refresh token: revoke old one, issue new one in same family.
    * Returns false if the old token was already revoked (theft detection).
+   *
+   * login_iat is copied from the existing row to the new token so the original
+   * login timestamp is preserved across every silent-refresh rotation cycle.
+   * This is what allows step-up auth and idle-timeout checks to accurately
+   * reflect "time since login" rather than "time since last refresh".
    */
   async rotateRefreshToken(
     oldTokenHash: string,
@@ -349,8 +354,12 @@ export class AuthDB {
       .bind(oldTokenHash)
       .run();
 
-    // Insert new token
-    await this.insertRefreshToken(newToken);
+    // Insert new token, carrying forward login_iat from the old row so the
+    // original login timestamp is preserved across rotations.
+    await this.insertRefreshToken({
+      ...newToken,
+      login_iat: existing.login_iat,
+    });
 
     return { success: true, reuseDetected: false };
   }
