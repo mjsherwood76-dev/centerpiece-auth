@@ -403,6 +403,60 @@ export class AuthDB {
       .run();
   }
 
+  /**
+   * List active (non-revoked, non-expired) refresh tokens for a user.
+   * Used by the Admin Sessions tab to display per-device sessions.
+   *
+   * Returns fields needed for display: id, device_label, device_fingerprint,
+   * device_remembered, created_at, last_used_at, ip (used as ip_country proxy).
+   */
+  async getActiveSessionsByUser(userId: string): Promise<Array<{
+    id: string;
+    device_label: string | null;
+    device_fingerprint: string | null;
+    device_remembered: number;
+    created_at: string;
+    last_used_at: string | null;
+    ip: string | null;
+  }>> {
+    const now = Math.floor(Date.now() / 1000);
+    const result = await this.db
+      .prepare(
+        `SELECT id, device_label, device_fingerprint, device_remembered,
+                created_at, last_used_at, ip
+         FROM refresh_tokens
+         WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?
+         ORDER BY COALESCE(last_used_at, created_at) DESC`
+      )
+      .bind(userId, now)
+      .all<{
+        id: string;
+        device_label: string | null;
+        device_fingerprint: string | null;
+        device_remembered: number;
+        created_at: string;
+        last_used_at: string | null;
+        ip: string | null;
+      }>();
+    return result.results;
+  }
+
+  /**
+   * Revoke a specific refresh token by ID, only if it belongs to the given user.
+   * Returns true if a row was revoked, false if not found or belongs to different user.
+   */
+  async revokeSessionById(sessionId: string, userId: string): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `UPDATE refresh_tokens
+         SET revoked_at = datetime('now')
+         WHERE id = ? AND user_id = ? AND revoked_at IS NULL`
+      )
+      .bind(sessionId, userId)
+      .run();
+    return (result.meta.changes ?? 0) > 0;
+  }
+
   // ─── Password Reset Tokens ─────────────────────────────
 
   async insertPasswordResetToken(token: {

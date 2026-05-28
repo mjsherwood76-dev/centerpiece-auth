@@ -36,6 +36,7 @@ import { handleSwitchTenant } from './handlers/switchTenant.js';
 import { handleInternalMemberships } from './handlers/internalMemberships.js';
 import { handleInternalUserLookup } from './handlers/internalUsers.js';
 import { handleInternalCustomers } from './handlers/internalCustomers.js';
+import { handleInternalSessions } from './handlers/internalSessions.js';
 import { handleImpersonate } from './handlers/impersonate.js';
 import { handleCustomerRoutes } from './handlers/customers.js';
 import { checkRateLimit } from './security/rateLimit.js';
@@ -263,6 +264,11 @@ export default {
           statusCode: response.status,
           correlationId,
         });
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      if (path.startsWith('/api/internal/sessions')) {
+        response = await handleInternalSessions(request, env);
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
