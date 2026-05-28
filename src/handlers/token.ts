@@ -263,6 +263,9 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
         iss: env.AUTH_DOMAIN,
         contexts: adminContexts,
         primaryTenantId: adminPrimaryTenantId,
+        // Pass the refresh_token.id as jti so S4's "Current device" badge can
+        // match the JWT's jti against the active refresh_tokens row id.
+        jti: authCodeRow.refresh_token_id ?? undefined,
       })
     : buildCustomerJwtPayload({
         userId: user.id,

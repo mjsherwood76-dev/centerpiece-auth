@@ -213,11 +213,12 @@ export class AuthDB {
     expires_at: number;
     code_challenge?: string | null;
     code_challenge_method?: 'S256' | null;
+    refresh_token_id?: string | null; // added by migration 0007; used to set JWT jti
   }): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO auth_codes (code_hash, user_id, tenant_id, redirect_origin, aud, expires_at, code_challenge, code_challenge_method)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO auth_codes (code_hash, user_id, tenant_id, redirect_origin, aud, expires_at, code_challenge, code_challenge_method, refresh_token_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         code.code_hash,
@@ -227,7 +228,8 @@ export class AuthDB {
         code.aud,
         code.expires_at,
         code.code_challenge ?? null,
-        code.code_challenge_method ?? null
+        code.code_challenge_method ?? null,
+        code.refresh_token_id ?? null,
       )
       .run();
   }
@@ -274,11 +276,17 @@ export class AuthDB {
     expires_at: number;
     ip?: string | null;
     user_agent?: string | null;
+    device_remembered?: number;   // 0 | 1; defaults to 0
+    device_label?: string | null;
+    device_fingerprint?: string | null;
+    login_iat?: number;           // Unix seconds; defaults to 0 (backfilled by migration)
   }): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO refresh_tokens (id, user_id, token_hash, family_id, expires_at, ip, user_agent)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO refresh_tokens
+           (id, user_id, token_hash, family_id, expires_at, ip, user_agent,
+            device_remembered, device_label, device_fingerprint, login_iat)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         token.id,
@@ -287,7 +295,11 @@ export class AuthDB {
         token.family_id,
         token.expires_at,
         token.ip ?? null,
-        token.user_agent ?? null
+        token.user_agent ?? null,
+        token.device_remembered ?? 0,
+        token.device_label ?? null,
+        token.device_fingerprint ?? null,
+        token.login_iat ?? 0,
       )
       .run();
   }
@@ -430,11 +442,12 @@ export class AuthDB {
     client_code_challenge?: string | null;
     client_code_challenge_method?: 'S256' | null;
     audience?: string | null;
+    remember_device?: number; // 0 | 1; added by migration 0007
   }): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO oauth_states (state, tenant_id, redirect_url, code_verifier, nonce, provider, expires_at, client_code_challenge, client_code_challenge_method, audience)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO oauth_states (state, tenant_id, redirect_url, code_verifier, nonce, provider, expires_at, client_code_challenge, client_code_challenge_method, audience, remember_device)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         state.state,
@@ -446,7 +459,8 @@ export class AuthDB {
         state.expires_at,
         state.client_code_challenge ?? null,
         state.client_code_challenge_method ?? null,
-        state.audience ?? null
+        state.audience ?? null,
+        state.remember_device ?? 0,
       )
       .run();
   }
@@ -463,6 +477,7 @@ export class AuthDB {
     client_code_challenge: string | null;
     client_code_challenge_method: 'S256' | null;
     audience: string | null;
+    remember_device: number; // 0 | 1; added by migration 0007
   } | null> {
     const row = await this.db
       .prepare('SELECT * FROM oauth_states WHERE state = ?')
@@ -478,6 +493,7 @@ export class AuthDB {
         client_code_challenge: string | null;
         client_code_challenge_method: 'S256' | null;
         audience: string | null;
+        remember_device: number;
       }>();
     if (!row) return null;
 

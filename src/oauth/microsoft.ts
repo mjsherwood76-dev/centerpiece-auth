@@ -53,7 +53,7 @@ export async function handleMicrosoftOAuthInit(request: Request, env: Env): Prom
   const validation = await validateOAuthInitiation(request, env);
   if (validation instanceof Response) return validation;
 
-  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience } = validation;
+  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience, rememberDevice } = validation;
 
   // Create OAuth state with PKCE + nonce (Microsoft supports OIDC)
   const { state, codeChallenge, nonce } = await createOAuthState(
@@ -64,7 +64,8 @@ export async function handleMicrosoftOAuthInit(request: Request, env: Env): Prom
     true, // useNonce for OIDC
     clientCodeChallenge,
     clientCodeChallengeMethod,
-    audience
+    audience,
+    rememberDevice
   );
 
   // Build Microsoft authorization URL

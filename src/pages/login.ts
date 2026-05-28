@@ -65,6 +65,13 @@ export async function handleLoginPage(request: Request, env: Env): Promise<Respo
         <a class="auth-link" href="${escapeAttr(env.AUTH_DOMAIN)}/reset-password?tenant=${encodeURIComponent(tenant || '')}&redirect=${encodeURIComponent(redirect)}">Forgot password?</a>
       </div>
 
+      <div class="form-group form-group--checkbox">
+        <label class="form-label form-label--checkbox">
+          <input type="checkbox" name="remember_device" id="remember_device" value="1">
+          Remember this device for 90 days
+        </label>
+      </div>
+
       <button class="btn-primary" type="submit">Sign In</button>
     </form>
 
@@ -72,24 +79,41 @@ export async function handleLoginPage(request: Request, env: Env): Promise<Respo
       <span class="auth-divider__text">or</span>
     </div>
 
-    <div class="oauth-buttons">
-      <a class="btn-oauth" href="${escapeAttr(oauthBase)}/google?${oauthParams}">
+    <div class="oauth-buttons" id="oauth-buttons">
+      <a class="btn-oauth" id="oauth-google" href="${escapeAttr(oauthBase)}/google?${oauthParams}">
         ${oauthIcons.google}
         Continue with Google
       </a>
-      <a class="btn-oauth" href="${escapeAttr(oauthBase)}/facebook?${oauthParams}">
+      <a class="btn-oauth" id="oauth-facebook" href="${escapeAttr(oauthBase)}/facebook?${oauthParams}">
         ${oauthIcons.facebook}
         Continue with Facebook
       </a>
-      <a class="btn-oauth" href="${escapeAttr(oauthBase)}/apple?${oauthParams}">
+      <a class="btn-oauth" id="oauth-apple" href="${escapeAttr(oauthBase)}/apple?${oauthParams}">
         ${oauthIcons.apple}
         Continue with Apple
       </a>
-      <a class="btn-oauth" href="${escapeAttr(oauthBase)}/microsoft?${oauthParams}">
+      <a class="btn-oauth" id="oauth-microsoft" href="${escapeAttr(oauthBase)}/microsoft?${oauthParams}">
         ${oauthIcons.microsoft}
         Continue with Microsoft
       </a>
     </div>
+
+    <script>
+      (function () {
+        var cb = document.getElementById('remember_device');
+        var buttons = document.querySelectorAll('#oauth-buttons .btn-oauth');
+        buttons.forEach(function (btn) {
+          btn.addEventListener('click', function (e) {
+            if (cb && cb.checked) {
+              e.preventDefault();
+              var href = btn.getAttribute('href');
+              var sep = href.indexOf('?') !== -1 ? '&' : '?';
+              window.location.href = href + sep + 'remember_device=1';
+            }
+          });
+        });
+      })();
+    </script>
 
     <p class="auth-footer-link">
       Don't have an account?

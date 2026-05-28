@@ -38,6 +38,8 @@ export interface OAuthStateData {
   clientCodeChallengeMethod: 'S256' | null;
   /** 'admin' | 'storefront' — audience from the initiating client. */
   audience: string | null;
+  /** true if the user checked "Remember this device" before clicking an OAuth button. */
+  rememberDevice: boolean;
 }
 
 // ─── State TTL ──────────────────────────────────────────────
@@ -107,7 +109,8 @@ export async function createOAuthState(
   useNonce: boolean,
   clientCodeChallenge?: string | null,
   clientCodeChallengeMethod?: 'S256' | null,
-  audience?: string | null
+  audience?: string | null,
+  rememberDevice?: boolean
 ): Promise<{ state: string; codeVerifier: string; codeChallenge: string; nonce: string | null }> {
   const db = new AuthDB(env.AUTH_DB);
   await db.enableForeignKeys();
@@ -129,6 +132,7 @@ export async function createOAuthState(
     client_code_challenge: clientCodeChallenge ?? null,
     client_code_challenge_method: clientCodeChallengeMethod ?? null,
     audience: audience ?? null,
+    remember_device: rememberDevice ? 1 : 0,
   });
 
   return { state, codeVerifier, codeChallenge, nonce };
@@ -164,6 +168,7 @@ export async function consumeOAuthState(
     clientCodeChallenge: row.client_code_challenge ?? null,
     clientCodeChallengeMethod: row.client_code_challenge_method ?? null,
     audience: row.audience ?? null,
+    rememberDevice: row.remember_device === 1,
   };
 }
 
@@ -177,13 +182,15 @@ export async function consumeOAuthState(
 export async function validateOAuthInitiation(
   request: Request,
   env: Env
-): Promise<{ tenantId: string; redirectUrl: string; clientCodeChallenge: string | null; clientCodeChallengeMethod: 'S256' | null; audience: string | null } | Response> {
+): Promise<{ tenantId: string; redirectUrl: string; clientCodeChallenge: string | null; clientCodeChallengeMethod: 'S256' | null; audience: string | null; rememberDevice: boolean } | Response> {
   const url = new URL(request.url);
   const tenant = url.searchParams.get('tenant') || '';
   const redirect = url.searchParams.get('redirect') || '';
   const clientCodeChallenge = url.searchParams.get('code_challenge') || null;
   const clientCodeChallengeMethod = (url.searchParams.get('code_challenge_method') || null) as 'S256' | null;
   const audience = url.searchParams.get('audience') || null;
+  // remember_device=1 appended to the OAuth URL by the login page form submit script
+  const rememberDevice = url.searchParams.get('remember_device') === '1';
 
   if (!redirect) {
     return oauthErrorRedirect(env, tenant, '', 'invalid_redirect');
@@ -194,7 +201,7 @@ export async function validateOAuthInitiation(
     return oauthErrorRedirect(env, tenant, '', 'invalid_redirect');
   }
 
-  return { tenantId: validation.tenantId, redirectUrl: redirect, clientCodeChallenge, clientCodeChallengeMethod, audience };
+  return { tenantId: validation.tenantId, redirectUrl: redirect, clientCodeChallenge, clientCodeChallengeMethod, audience, rememberDevice };
 }
 
 // ─── Error Helpers ──────────────────────────────────────────

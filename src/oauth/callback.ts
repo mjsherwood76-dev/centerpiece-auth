@@ -32,6 +32,7 @@ import {
 } from '../crypto/refreshTokens.js';
 import { validateRedirectUrl } from '../security/redirectValidator.js';
 import { isAdminDomain } from '../security/platformDomains.js';
+import { buildDeviceLabel, buildDeviceFingerprint } from '../security/deviceLabel.js';
 
 /**
  * Handle the shared OAuth callback logic after a provider extracts the user profile.
@@ -80,24 +81,36 @@ export async function handleOAuthCallback(
   const refreshToken = generateRefreshToken();
   const refreshTokenHash = await hashRefreshToken(refreshToken);
   const familyId = generateUUID();
-  const refreshTtlDays = parseInt(env.REFRESH_TOKEN_TTL_DAYS || '30', 10);
-  const refreshExpiresAt = Math.floor(Date.now() / 1000) + refreshTtlDays * 24 * 60 * 60;
+  const refreshTokenId = generateUUID();
+  const loginIat = Math.floor(Date.now() / 1000);
+  const rememberDevice = stateData.rememberDevice;
+  const refreshTtlDays = rememberDevice
+    ? parseInt(env.REFRESH_TOKEN_TTL_DAYS_REMEMBERED || '90', 10)
+    : parseInt(env.REFRESH_TOKEN_TTL_DAYS || '30', 10);
+  const refreshExpiresAt = loginIat + refreshTtlDays * 24 * 60 * 60;
+
+  const ua = request.headers.get('User-Agent');
+  const cfCountry = request.headers.get('CF-IPCountry');
 
   await db.insertRefreshToken({
-    id: generateUUID(),
+    id: refreshTokenId,
     user_id: userId,
     token_hash: refreshTokenHash,
     family_id: familyId,
     expires_at: refreshExpiresAt,
     ip: request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For'),
-    user_agent: request.headers.get('User-Agent'),
+    user_agent: ua,
+    device_remembered: rememberDevice ? 1 : 0,
+    device_label: buildDeviceLabel(ua),
+    device_fingerprint: await buildDeviceFingerprint(ua, cfCountry),
+    login_iat: loginIat,
   });
 
   // ── Generate authorization code ──
   const authCode = generateAuthCode();
   const authCodeHash = await hashAuthCode(authCode);
   const codeTtlSeconds = parseInt(env.AUTH_CODE_TTL_SECONDS || '60', 10);
-  const codeExpiresAt = Math.floor(Date.now() / 1000) + codeTtlSeconds;
+  const codeExpiresAt = loginIat + codeTtlSeconds;
 
   // ── Determine audience from state data or redirect URL ──
   const aud = stateData.audience === 'admin' ? 'admin' : resolveAudience(redirectUrl);
@@ -111,6 +124,7 @@ export async function handleOAuthCallback(
     expires_at: codeExpiresAt,
     code_challenge: stateData.clientCodeChallenge ?? null,
     code_challenge_method: stateData.clientCodeChallengeMethod ?? null,
+    refresh_token_id: refreshTokenId,
   });
 
   // ── Redirect with code ──

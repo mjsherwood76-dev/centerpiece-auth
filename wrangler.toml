@@ -49,6 +49,7 @@ EMAIL_FROM_NAME = "Centerpiece Lab"
 # silent refresh will make rollover transparent.
 ACCESS_TOKEN_TTL_SECONDS = "7200"
 REFRESH_TOKEN_TTL_DAYS = "30"
+REFRESH_TOKEN_TTL_DAYS_REMEMBERED = "90"
 AUTH_CODE_TTL_SECONDS = "60"
 # Tenant id used for transactional emails sent outside any tenant storefront
 # context (e.g. platform-admin password reset on hub.centerpiecelab.com).
@@ -84,7 +85,7 @@ command = "npm run build"
 [env.staging]
 name = "centerpiece-auth-staging"
 workers_dev = true
-vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://auth.centerpiecelab.dev", EMAIL_FROM = "noreply@centerpiecelab.com", EMAIL_FROM_NAME = "Centerpiece Lab", ACCESS_TOKEN_TTL_SECONDS = "7200", REFRESH_TOKEN_TTL_DAYS = "30", AUTH_CODE_TTL_SECONDS = "60", PLATFORM_TENANT_ID = "centerpiecelab-staging", PLATFORM_OWNER_EMAIL_DOMAINS = "centerpiecelab.com,centerpiecelab.dev" }
+vars = { ENVIRONMENT = "staging", AUTH_DOMAIN = "https://auth.centerpiecelab.dev", EMAIL_FROM = "noreply@centerpiecelab.com", EMAIL_FROM_NAME = "Centerpiece Lab", ACCESS_TOKEN_TTL_SECONDS = "7200", REFRESH_TOKEN_TTL_DAYS = "30", REFRESH_TOKEN_TTL_DAYS_REMEMBERED = "90", AUTH_CODE_TTL_SECONDS = "60", PLATFORM_TENANT_ID = "centerpiecelab-staging", PLATFORM_OWNER_EMAIL_DOMAINS = "centerpiecelab.com,centerpiecelab.dev" }
 
 [[env.staging.routes]]
 pattern = "auth.centerpiecelab.dev/*"

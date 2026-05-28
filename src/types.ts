@@ -29,6 +29,7 @@ export interface Env {
   AUTH_DOMAIN: string;
   ACCESS_TOKEN_TTL_SECONDS: string;
   REFRESH_TOKEN_TTL_DAYS: string;
+  REFRESH_TOKEN_TTL_DAYS_REMEMBERED: string;
   AUTH_CODE_TTL_SECONDS: string;
 
   // Tenant id used for transactional emails sent outside any tenant storefront

@@ -35,6 +35,7 @@ import { isAdminDomain } from '../security/platformDomains.js';
 import { loadTenantBranding } from '../branding.js';
 import { sendWelcomeEmail } from '../email/send.js';
 import { parseRequestBody } from '../util/parseRequestBody.js';
+import { buildDeviceLabel, buildDeviceFingerprint } from '../security/deviceLabel.js';
 
 /**
  * Handle POST /api/register
@@ -55,6 +56,7 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   let redirectUrl: string;
   let audienceParam: string;
   let codeChallenge: string;
+  let rememberDevice: boolean;
 
   try {
     const body = await parseRequestBody(request);
@@ -67,6 +69,7 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
     redirectUrl = (body.redirect || '').trim();
     audienceParam = (body.audience || '').trim();
     codeChallenge = (body.code_challenge || '').trim();
+    rememberDevice = body.remember_device === '1' || body.remember_device === 'true';
   } catch {
     return errorRedirect(env, '', '', 'invalid_request');
   }
@@ -139,24 +142,35 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   const refreshToken = generateRefreshToken();
   const refreshTokenHash = await hashRefreshToken(refreshToken);
   const familyId = generateUUID();
-  const refreshTtlDays = parseInt(env.REFRESH_TOKEN_TTL_DAYS || '30', 10);
-  const refreshExpiresAt = Math.floor(Date.now() / 1000) + refreshTtlDays * 24 * 60 * 60;
+  const refreshTokenId = generateUUID();
+  const loginIat = Math.floor(Date.now() / 1000);
+  const refreshTtlDays = rememberDevice
+    ? parseInt(env.REFRESH_TOKEN_TTL_DAYS_REMEMBERED || '90', 10)
+    : parseInt(env.REFRESH_TOKEN_TTL_DAYS || '30', 10);
+  const refreshExpiresAt = loginIat + refreshTtlDays * 24 * 60 * 60;
+
+  const ua = request.headers.get('User-Agent');
+  const cfCountry = request.headers.get('CF-IPCountry');
 
   await db.insertRefreshToken({
-    id: generateUUID(),
+    id: refreshTokenId,
     user_id: userId,
     token_hash: refreshTokenHash,
     family_id: familyId,
     expires_at: refreshExpiresAt,
     ip: request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For'),
-    user_agent: request.headers.get('User-Agent'),
+    user_agent: ua,
+    device_remembered: rememberDevice ? 1 : 0,
+    device_label: buildDeviceLabel(ua),
+    device_fingerprint: await buildDeviceFingerprint(ua, cfCountry),
+    login_iat: loginIat,
   });
 
   // ── Generate authorization code ──
   const authCode = generateAuthCode();
   const authCodeHash = await hashAuthCode(authCode);
   const codeTtlSeconds = parseInt(env.AUTH_CODE_TTL_SECONDS || '60', 10);
-  const codeExpiresAt = Math.floor(Date.now() / 1000) + codeTtlSeconds;
+  const codeExpiresAt = loginIat + codeTtlSeconds;
 
   // ── Determine audience (admin vs storefront) ──
   const aud = resolveAudience(redirectUrl, audienceParam);
@@ -170,6 +184,7 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
     expires_at: codeExpiresAt,
     code_challenge: aud === 'admin' && codeChallenge ? codeChallenge : null,
     code_challenge_method: aud === 'admin' && codeChallenge ? 'S256' : null,
+    refresh_token_id: refreshTokenId,
   });
 
   // ── Redirect with code ──

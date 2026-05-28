@@ -46,6 +46,8 @@ export interface AuthCodeRow {
   created_at: string;
   code_challenge: string | null;
   code_challenge_method: 'S256' | null;
+  // Added by migration 0007 (Fix_Auth_Session_UX S3)
+  refresh_token_id: string | null; // refresh_tokens.id; used to set JWT jti
 }
 
 export interface RefreshTokenRow {
@@ -59,4 +61,9 @@ export interface RefreshTokenRow {
   ip: string | null;
   user_agent: string | null;
   created_at: string;
+  // Added by migration 0007 (Fix_Auth_Session_UX S3)
+  device_remembered: number; // 0 | 1 — SQLite boolean
+  device_label: string | null; // display-only UA parse; format may drift
+  device_fingerprint: string | null; // sha256(UA | cfCountry)
+  login_iat: number; // Unix seconds of the original login event; preserved across rotations
 }

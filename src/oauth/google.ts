@@ -43,7 +43,7 @@ export async function handleGoogleOAuthInit(request: Request, env: Env): Promise
   const validation = await validateOAuthInitiation(request, env);
   if (validation instanceof Response) return validation;
 
-  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience } = validation;
+  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience, rememberDevice } = validation;
 
   // Create OAuth state with PKCE + nonce (Google supports OIDC)
   const { state, codeChallenge, nonce } = await createOAuthState(
@@ -54,7 +54,8 @@ export async function handleGoogleOAuthInit(request: Request, env: Env): Promise
     true, // useNonce for OIDC
     clientCodeChallenge,
     clientCodeChallengeMethod,
-    audience
+    audience,
+    rememberDevice
   );
 
   // Build Google authorization URL

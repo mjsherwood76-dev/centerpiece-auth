@@ -42,7 +42,7 @@ export async function handleFacebookOAuthInit(request: Request, env: Env): Promi
   const validation = await validateOAuthInitiation(request, env);
   if (validation instanceof Response) return validation;
 
-  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience } = validation;
+  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience, rememberDevice } = validation;
 
   // Create OAuth state (no nonce for Facebook — not OIDC)
   const { state } = await createOAuthState(
@@ -53,7 +53,8 @@ export async function handleFacebookOAuthInit(request: Request, env: Env): Promi
     false, // no nonce — Facebook is not OIDC
     clientCodeChallenge,
     clientCodeChallengeMethod,
-    audience
+    audience,
+    rememberDevice
   );
 
   // Build Facebook authorization URL
