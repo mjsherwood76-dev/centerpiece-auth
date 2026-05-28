@@ -50,6 +50,11 @@ export interface Env {
   // Secret for internal service-to-service calls (e.g. runtime → auth)
   INTERNAL_SECRET?: string;
 
+  // Comma-separated list of allowed email domains for the platform role.
+  // Production: "centerpiecelab.com"
+  // Staging:    "centerpiecelab.com,centerpiecelab.dev"
+  PLATFORM_OWNER_EMAIL_DOMAINS: string;
+
   // Secrets (OAuth providers — wired in Session 4)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;

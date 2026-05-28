@@ -22,6 +22,7 @@ import { AuthDB } from '../db.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
 import { requireInternalSecret } from '../security/internalSecret.js';
+import { isPlatformEmailAllowed } from '../security/emailDomainCheck.js';
 import { jsonResponse } from '../util/httpJson.js';
 
 const logger = new ConsoleJsonLogger();
@@ -106,13 +107,31 @@ async function handlePost(request: Request, env: Env): Promise<Response> {
     return jsonResponse({ error: 'Platform context is only valid on __platform__ tenant' }, 400);
   }
 
-  // ── Enforce @centerpiecelab.com email for platform context (Defense-in-Depth Layer 1) ──
+  // ── Enforce allowed email domain for platform context (Defense-in-Depth Layer 1) ──
   if (context === 'platform') {
     const db = new AuthDB(env.AUTH_DB);
     await db.enableForeignKeys();
     const user = await db.getUserById(userId);
-    if (!user || !user.email.endsWith('@centerpiecelab.com')) {
-      return jsonResponse({ error: 'Platform context requires @centerpiecelab.com email' }, 400);
+    if (!user || !isPlatformEmailAllowed(user.email, env)) {
+      const email = user?.email ?? '';
+      const domain = email.includes('@') ? email.split('@')[1] : '';
+      const correlationId = request.headers.get('x-request-id')
+        || request.headers.get('x-correlation-id')
+        || 'unknown';
+      logAuthEvent(logger, {
+        event: 'membership.platform_domain_rejected',
+        ip: request.headers.get('CF-Connecting-IP') || 'internal',
+        route: '/api/internal/memberships',
+        correlationId,
+        userId,
+        details: { userId, email, domain },
+      });
+      return jsonResponse({
+        error: {
+          code: 'platform_role.email_domain_restricted',
+          message: 'Platform role requires an email address on an allowed domain.',
+        },
+      }, 403);
     }
   }
 

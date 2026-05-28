@@ -40,6 +40,7 @@ import {
   type UnsignedJwtClaims,
 } from '../crypto/jwt.js';
 import { jsonError } from '../util/httpJson.js';
+import { isPlatformEmailAllowed } from '../security/emailDomainCheck.js';
 
 /**
  * Handle POST /api/token
@@ -157,12 +158,12 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
   if (authCodeRow.aud === 'admin') {
     let memberships = await db.getAdminMemberships(user.id);
 
-    // ── Defense-in-Depth Layer 2: strip platform context for non-@centerpiecelab.com emails ──
-    if (!user.email.endsWith('@centerpiecelab.com')) {
+    // ── Defense-in-Depth Layer 2: strip platform context for non-allowed-domain emails ──
+    if (!isPlatformEmailAllowed(user.email, env)) {
       const before = memberships.length;
       memberships = memberships.filter(m => m.context !== 'platform');
       if (memberships.length !== before) {
-        console.warn('Token issuance: stripped platform context for non-centerpiecelab email', {
+        console.warn('Token issuance: stripped platform context for non-allowed-domain email', {
           userId: user.id,
           email: user.email,
         });
