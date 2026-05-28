@@ -40,6 +40,12 @@ export interface JwtClaims {
   // so that step-up auth and idle-timeout checks can distinguish "just logged in" from
   // "has an active session". Present on admin tokens only; omitted for storefront/impersonation.
   login_iat?: number;
+  // Step-up claims (present only on tokens issued by /api/auth/step-up).
+  // step_up discriminates a step-up token; step_up_for binds it to a specific resource
+  // descriptor (e.g. "tenant:delete:<tenantId>") so the receiving middleware can verify
+  // the token was minted for the operation being attempted.
+  step_up?: true;
+  step_up_for?: string;
   // Impersonation claims (present only on impersonation tokens)
   impersonatedBy?: string;         // admin userId who initiated impersonation
   sessionType?: 'impersonation';   // marks this as an impersonation token
@@ -125,6 +131,38 @@ export function buildAdminJwtPayload(
 }
 
 /**
+ * Build a short-lived step-up JWT payload (`aud: 'admin'`, `step_up: true`).
+ *
+ * Step-up tokens are bound to a specific operation via `step_up_for` (e.g.
+ * "tenant:delete:<tenantId>"). The receiving middleware verifies both the
+ * `step_up_for` descriptor and the token's freshness (5-min TTL by default).
+ *
+ * Contexts are copied from the caller's current admin session so RBAC checks
+ * downstream of the step-up middleware still pass.
+ */
+export function buildStepUpJwtPayload(
+  input: JwtIdentityInput & {
+    contexts: Record<string, string[]>;
+    primaryTenantId: string | null;
+    stepUpFor: string;
+    jti?: string;
+  },
+): UnsignedJwtClaims {
+  return {
+    sub: input.userId,
+    email: input.email,
+    name: input.name,
+    aud: 'admin',
+    iss: input.iss,
+    jti: input.jti ?? crypto.randomUUID(),
+    contexts: input.contexts,
+    primaryTenantId: input.primaryTenantId,
+    step_up: true,
+    step_up_for: input.stepUpFor,
+  };
+}
+
+/**
  * Build an admin impersonation JWT payload (`aud: 'admin'`,
  * `sessionType: 'impersonation'`).
  *
@@ -193,6 +231,8 @@ export async function signJwt(
   if (payload.contexts !== undefined) fullPayload.contexts = payload.contexts;
   if (payload.primaryTenantId !== undefined) fullPayload.primaryTenantId = payload.primaryTenantId;
   if (payload.login_iat !== undefined) fullPayload.login_iat = payload.login_iat;
+  if (payload.step_up !== undefined) fullPayload.step_up = payload.step_up;
+  if (payload.step_up_for !== undefined) fullPayload.step_up_for = payload.step_up_for;
   if (payload.impersonatedBy !== undefined) fullPayload.impersonatedBy = payload.impersonatedBy;
   if (payload.sessionType !== undefined) fullPayload.sessionType = payload.sessionType;
 
