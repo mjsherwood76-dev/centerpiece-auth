@@ -299,7 +299,35 @@ function generateCssVariables(brand: BrandTheme, style: StyleTheme): string {
 
 /**
  * Generate Google Fonts <link> tags for the brand's typography.
+ *
+ * Google's css2?family=A&family=B endpoint is all-or-nothing: a SINGLE unknown
+ * family in the URL returns 400 for the entire request and no fonts load.
+ * Per memory [[feedback_google_fonts_url_all_or_nothing]], filter system fonts
+ * (Apple SFMono-Regular, Microsoft Consolas, etc.) BEFORE piping the brand's
+ * font stack into the URL. Mirrors the SYSTEM_FONTS allowlist in
+ * centerpiece-site-runtime/src/core/rendering/googleFonts.ts.
  */
+const SYSTEM_FONTS = new Set<string>([
+  'system-ui',
+  'sans-serif',
+  'serif',
+  'monospace',
+  '-apple-system',
+  'BlinkMacSystemFont',
+  'Segoe UI',
+  'Roboto',
+  'Arial',
+  'ui-monospace',
+  'ui-sans-serif',
+  'ui-serif',
+  'SFMono-Regular',
+  'Menlo',
+  'Monaco',
+  'Consolas',
+  'Liberation Mono',
+  'Courier New',
+]);
+
 function generateGoogleFontsLinks(brand: BrandTheme): string {
   const fontFamilies = new Set<string>();
 
@@ -309,13 +337,13 @@ function generateGoogleFontsLinks(brand: BrandTheme): string {
       const name = font.replace(/['"]/g, '').trim();
       if (
         name &&
+        !SYSTEM_FONTS.has(name) &&
         !name.startsWith('system-') &&
         !name.startsWith('-apple-') &&
-        name !== 'BlinkMacSystemFont' &&
+        !name.startsWith('ui-') &&
         !name.includes('monospace') &&
         !name.includes('sans-serif') &&
-        !name.includes('serif') &&
-        !name.startsWith('ui-')
+        !name.includes('serif')
       ) {
         fontFamilies.add(name);
       }
