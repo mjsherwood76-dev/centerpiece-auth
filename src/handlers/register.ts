@@ -56,6 +56,7 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   let redirectUrl: string;
   let audienceParam: string;
   let codeChallenge: string;
+  let pkceSession: string;
   let rememberDevice: boolean;
 
   try {
@@ -69,6 +70,7 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
     redirectUrl = (body.redirect || '').trim();
     audienceParam = (body.audience || '').trim();
     codeChallenge = (body.code_challenge || '').trim();
+    pkceSession = (body.pkce_session || '').trim();
     rememberDevice = body.remember_device === '1' || body.remember_device === 'true';
   } catch {
     return errorRedirect(env, '', '', 'invalid_request');
@@ -194,6 +196,11 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   callbackUrl.searchParams.set('code', authCode);
   // Preserve original path as the final redirect destination
   callbackUrl.searchParams.set('returnTo', returnUrl.pathname + returnUrl.search);
+  // Carry the server-side PKCE session reference back to the SPA so the eventual
+  // /api/token call can resolve the verifier without depending on client storage.
+  if (aud === 'admin' && pkceSession) {
+    callbackUrl.searchParams.set('pkce_session_id', pkceSession);
+  }
 
   const refreshCookie = buildRefreshCookieHeader(refreshToken, refreshTtlDays, env.AUTH_DOMAIN);
 

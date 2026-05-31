@@ -9,18 +9,23 @@
  *    Body: `{ code, tenant_id, redirect_origin, code_verifier? }`
  *
  * 2. **Admin SPA** (browser → auth Worker, with PKCE):
- *    Body: `{ grant_type: "authorization_code", code, redirect_uri, code_verifier }`
+ *    Body: `{ grant_type: "authorization_code", code, redirect_uri, code_verifier | pkce_session_id }`
  *    - `tenant_id` and `redirect_origin` are derived from the stored auth code row
+ *    - PKCE verifier may be supplied directly (`code_verifier`) OR by opaque
+ *      reference to a server-stored row (`pkce_session_id`). The latter is used
+ *      by the hub SPA on .com production where Chrome's bounce-tracking
+ *      intervention can wipe client-side storage across the OAuth round trip.
  *
  * Flow:
  * 1. Accept and normalize input fields
- * 2. Hash the code, look up in `auth_codes` table
- * 3. Verify: not expired, redirect_origin matches
- * 4. If auth code has `code_challenge`: verify PKCE (SHA256(code_verifier) === code_challenge)
- * 5. Delete row immediately (single-use enforcement)
- * 6. Look up user details
- * 7. For admin audience: query tenant_memberships for contexts + primaryTenantId
- * 8. Return signed JWT access token
+ * 2. If `pkce_session_id` is present, consume the pkce_sessions row to obtain the verifier
+ * 3. Hash the code, look up in `auth_codes` table
+ * 4. Verify: not expired, redirect_origin matches
+ * 5. If auth code has `code_challenge`: verify PKCE (SHA256(code_verifier) === code_challenge)
+ * 6. Delete row immediately (single-use enforcement)
+ * 7. Look up user details
+ * 8. For admin audience: query tenant_memberships for contexts + primaryTenantId
+ * 9. Return signed JWT access token
  *
  * Security:
  * - Code stored as SHA-256 hash — plaintext never in DB
@@ -60,12 +65,14 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
   let tenantId: string;
   let redirectOrigin: string;
   let codeVerifier: string | undefined;
+  let pkceSessionId: string | undefined;
   let requestedTenantId: string | undefined; // Optional tenant hint for admin SPA re-auth
 
   try {
     const body = await request.json() as Record<string, string>;
     code = (body.code || '').trim();
     codeVerifier = body.code_verifier ? body.code_verifier.trim() : undefined;
+    pkceSessionId = body.pkce_session_id ? body.pkce_session_id.trim() : undefined;
     requestedTenantId = body.tenantId ? body.tenantId.trim() : undefined;
 
     // Support two field naming conventions:
@@ -129,8 +136,21 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
 
   // ── PKCE verification (required when code_challenge is present) ──
   if (authCodeRow.code_challenge) {
+    // If the SPA passed a server-side session reference instead of the verifier,
+    // resolve it now. Single-use: the row is deleted as it's read.
+    if (!codeVerifier && pkceSessionId) {
+      const session = await db.consumePkceSession(pkceSessionId);
+      if (!session) {
+        return jsonError('PKCE session not found or expired', 400);
+      }
+      if (session.expires_at <= now) {
+        return jsonError('PKCE session has expired', 400);
+      }
+      codeVerifier = session.verifier;
+    }
+
     if (!codeVerifier) {
-      return jsonError('PKCE code_verifier is required for this authorization code', 400);
+      return jsonError('PKCE code_verifier (or pkce_session_id) is required for this authorization code', 400);
     }
     // S256: BASE64URL(SHA256(code_verifier)) === code_challenge
     const verifierHash = await sha256Base64Url(codeVerifier);

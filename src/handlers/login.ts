@@ -51,6 +51,7 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   let redirectUrl: string;
   let audienceParam: string;
   let codeChallenge: string;
+  let pkceSession: string;
   let rememberDevice: boolean;
 
   try {
@@ -62,6 +63,7 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
     redirectUrl = (body.redirect || '').trim();
     audienceParam = (body.audience || '').trim();
     codeChallenge = (body.code_challenge || '').trim();
+    pkceSession = (body.pkce_session || '').trim();
     rememberDevice = body.remember_device === '1' || body.remember_device === 'true';
   } catch {
     return errorRedirect(env, '', '', 'invalid_credentials');
@@ -166,6 +168,12 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   const callbackUrl = new URL('/auth/callback', returnUrl.origin);
   callbackUrl.searchParams.set('code', authCode);
   callbackUrl.searchParams.set('returnTo', returnUrl.pathname + returnUrl.search);
+  // Forward the SPA's server-side PKCE session reference so the eventual
+  // token exchange can resolve the verifier (which the SPA's localStorage
+  // may have lost across the bounce-tracking-affected redirect).
+  if (aud === 'admin' && pkceSession) {
+    callbackUrl.searchParams.set('pkce_session_id', pkceSession);
+  }
 
   const refreshCookie = buildRefreshCookieHeader(refreshToken, refreshTtlDays, env.AUTH_DOMAIN);
 

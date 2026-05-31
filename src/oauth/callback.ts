@@ -132,6 +132,12 @@ export async function handleOAuthCallback(
   const callbackUrl = new URL('/auth/callback', returnUrl.origin);
   callbackUrl.searchParams.set('code', authCode);
   callbackUrl.searchParams.set('returnTo', returnUrl.pathname + returnUrl.search);
+  // Carry the server-side PKCE session reference back to the SPA. The SPA's
+  // local storage may have been wiped by Chrome's bounce-tracking intervention
+  // during the OAuth round trip, but URL params survive the navigation.
+  if (stateData.pkceSessionId) {
+    callbackUrl.searchParams.set('pkce_session_id', stateData.pkceSessionId);
+  }
 
   const refreshCookie = buildRefreshCookieHeader(refreshToken, refreshTtlDays, env.AUTH_DOMAIN);
 

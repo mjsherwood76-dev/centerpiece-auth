@@ -40,6 +40,13 @@ export interface OAuthStateData {
   audience: string | null;
   /** true if the user checked "Remember this device" before clicking an OAuth button. */
   rememberDevice: boolean;
+  /**
+   * Server-side PKCE session ID — opaque reference to a row in `pkce_sessions`
+   * holding the SPA's code_verifier. Threaded through the OAuth round trip so
+   * the eventual redirect back to hub can carry it as a URL param; bypasses
+   * Chrome bounce-tracking storage wipes on the hub origin.
+   */
+  pkceSessionId: string | null;
 }
 
 // ─── State TTL ──────────────────────────────────────────────
@@ -110,7 +117,8 @@ export async function createOAuthState(
   clientCodeChallenge?: string | null,
   clientCodeChallengeMethod?: 'S256' | null,
   audience?: string | null,
-  rememberDevice?: boolean
+  rememberDevice?: boolean,
+  pkceSessionId?: string | null
 ): Promise<{ state: string; codeVerifier: string; codeChallenge: string; nonce: string | null }> {
   const db = new AuthDB(env.AUTH_DB);
   await db.enableForeignKeys();
@@ -133,6 +141,7 @@ export async function createOAuthState(
     client_code_challenge_method: clientCodeChallengeMethod ?? null,
     audience: audience ?? null,
     remember_device: rememberDevice ? 1 : 0,
+    pkce_session_id: pkceSessionId ?? null,
   });
 
   return { state, codeVerifier, codeChallenge, nonce };
@@ -169,6 +178,7 @@ export async function consumeOAuthState(
     clientCodeChallengeMethod: row.client_code_challenge_method ?? null,
     audience: row.audience ?? null,
     rememberDevice: row.remember_device === 1,
+    pkceSessionId: row.pkce_session_id ?? null,
   };
 }
 
@@ -182,7 +192,7 @@ export async function consumeOAuthState(
 export async function validateOAuthInitiation(
   request: Request,
   env: Env
-): Promise<{ tenantId: string; redirectUrl: string; clientCodeChallenge: string | null; clientCodeChallengeMethod: 'S256' | null; audience: string | null; rememberDevice: boolean } | Response> {
+): Promise<{ tenantId: string; redirectUrl: string; clientCodeChallenge: string | null; clientCodeChallengeMethod: 'S256' | null; audience: string | null; rememberDevice: boolean; pkceSessionId: string | null } | Response> {
   const url = new URL(request.url);
   const tenant = url.searchParams.get('tenant') || '';
   const redirect = url.searchParams.get('redirect') || '';
@@ -191,6 +201,8 @@ export async function validateOAuthInitiation(
   const audience = url.searchParams.get('audience') || null;
   // remember_device=1 appended to the OAuth URL by the login page form submit script
   const rememberDevice = url.searchParams.get('remember_device') === '1';
+  // SPA's opaque PKCE session reference — survives the OAuth round trip via URL params.
+  const pkceSessionId = url.searchParams.get('pkce_session') || null;
 
   if (!redirect) {
     return oauthErrorRedirect(env, tenant, '', 'invalid_redirect');
@@ -201,7 +213,7 @@ export async function validateOAuthInitiation(
     return oauthErrorRedirect(env, tenant, '', 'invalid_redirect');
   }
 
-  return { tenantId: validation.tenantId, redirectUrl: redirect, clientCodeChallenge, clientCodeChallengeMethod, audience, rememberDevice };
+  return { tenantId: validation.tenantId, redirectUrl: redirect, clientCodeChallenge, clientCodeChallengeMethod, audience, rememberDevice, pkceSessionId };
 }
 
 // ─── Error Helpers ──────────────────────────────────────────

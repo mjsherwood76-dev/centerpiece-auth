@@ -30,12 +30,14 @@ export async function handleLoginPage(request: Request, env: Env): Promise<Respo
   const audience = url.searchParams.get('audience') || '';
   const codeChallenge = url.searchParams.get('code_challenge') || '';
   const codeChallengeMethod = url.searchParams.get('code_challenge_method') || '';
+  // Server-side PKCE session reference (.com bounce-tracking workaround).
+  const pkceSession = url.searchParams.get('pkce_session') || '';
 
   const branding = await loadTenantBranding(tenant, env);
 
   // Build OAuth URLs — include PKCE params so they flow through the OAuth state
   const oauthBase = `${env.AUTH_DOMAIN}/oauth`;
-  const oauthParams = buildOAuthParams(tenant, redirect, audience, codeChallenge, codeChallengeMethod);
+  const oauthParams = buildOAuthParams(tenant, redirect, audience, codeChallenge, codeChallengeMethod, pkceSession);
 
   const body = `
     <h1 class="auth-card__title">Sign In</h1>
@@ -50,6 +52,7 @@ export async function handleLoginPage(request: Request, env: Env): Promise<Respo
       ${audience ? `<input type="hidden" name="audience" value="${escapeAttr(audience)}">` : ''}
       ${codeChallenge ? `<input type="hidden" name="code_challenge" value="${escapeAttr(codeChallenge)}">` : ''}
       ${codeChallengeMethod ? `<input type="hidden" name="code_challenge_method" value="${escapeAttr(codeChallengeMethod)}">` : ''}
+      ${pkceSession ? `<input type="hidden" name="pkce_session" value="${escapeAttr(pkceSession)}">` : ''}
 
       <div class="form-group">
         <label class="form-label" for="email">Email</label>
@@ -117,7 +120,7 @@ export async function handleLoginPage(request: Request, env: Env): Promise<Respo
 
     <p class="auth-footer-link">
       Don't have an account?
-      <a class="auth-link" href="${escapeAttr(env.AUTH_DOMAIN)}/register?tenant=${encodeURIComponent(tenant || '')}&redirect=${encodeURIComponent(redirect)}${audience ? '&audience=' + encodeURIComponent(audience) : ''}${codeChallenge ? '&code_challenge=' + encodeURIComponent(codeChallenge) : ''}${codeChallengeMethod ? '&code_challenge_method=' + encodeURIComponent(codeChallengeMethod) : ''}">Sign up</a>
+      <a class="auth-link" href="${escapeAttr(env.AUTH_DOMAIN)}/register?tenant=${encodeURIComponent(tenant || '')}&redirect=${encodeURIComponent(redirect)}${audience ? '&audience=' + encodeURIComponent(audience) : ''}${codeChallenge ? '&code_challenge=' + encodeURIComponent(codeChallenge) : ''}${codeChallengeMethod ? '&code_challenge_method=' + encodeURIComponent(codeChallengeMethod) : ''}${pkceSession ? '&pkce_session=' + encodeURIComponent(pkceSession) : ''}">Sign up</a>
     </p>
   `;
 
@@ -142,7 +145,8 @@ function buildOAuthParams(
   redirect: string,
   audience: string,
   codeChallenge: string,
-  codeChallengeMethod: string
+  codeChallengeMethod: string,
+  pkceSession: string
 ): string {
   const params = new URLSearchParams();
   if (tenant) params.set('tenant', tenant);
@@ -150,6 +154,7 @@ function buildOAuthParams(
   if (audience) params.set('audience', audience);
   if (codeChallenge) params.set('code_challenge', codeChallenge);
   if (codeChallengeMethod) params.set('code_challenge_method', codeChallengeMethod);
+  if (pkceSession) params.set('pkce_session', pkceSession);
   return params.toString();
 }
 

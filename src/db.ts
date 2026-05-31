@@ -506,11 +506,12 @@ export class AuthDB {
     client_code_challenge_method?: 'S256' | null;
     audience?: string | null;
     remember_device?: number; // 0 | 1; added by migration 0007
+    pkce_session_id?: string | null; // added by migration 0008
   }): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO oauth_states (state, tenant_id, redirect_url, code_verifier, nonce, provider, expires_at, client_code_challenge, client_code_challenge_method, audience, remember_device)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO oauth_states (state, tenant_id, redirect_url, code_verifier, nonce, provider, expires_at, client_code_challenge, client_code_challenge_method, audience, remember_device, pkce_session_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         state.state,
@@ -524,6 +525,7 @@ export class AuthDB {
         state.client_code_challenge_method ?? null,
         state.audience ?? null,
         state.remember_device ?? 0,
+        state.pkce_session_id ?? null,
       )
       .run();
   }
@@ -541,6 +543,7 @@ export class AuthDB {
     client_code_challenge_method: 'S256' | null;
     audience: string | null;
     remember_device: number; // 0 | 1; added by migration 0007
+    pkce_session_id: string | null; // added by migration 0008
   } | null> {
     const row = await this.db
       .prepare('SELECT * FROM oauth_states WHERE state = ?')
@@ -557,12 +560,51 @@ export class AuthDB {
         client_code_challenge_method: 'S256' | null;
         audience: string | null;
         remember_device: number;
+        pkce_session_id: string | null;
       }>();
     if (!row) return null;
 
     await this.db.prepare('DELETE FROM oauth_states WHERE state = ?').bind(stateValue).run();
 
     return row;
+  }
+
+  // ─── PKCE Sessions (server-side store for SPA's code_verifier) ──────────
+
+  async insertPkceSession(session: {
+    id: string;
+    verifier: string;
+    created_at: number;
+    expires_at: number;
+  }): Promise<void> {
+    await this.db
+      .prepare('INSERT INTO pkce_sessions (id, verifier, created_at, expires_at) VALUES (?, ?, ?, ?)')
+      .bind(session.id, session.verifier, session.created_at, session.expires_at)
+      .run();
+  }
+
+  /** Single-use lookup — returns the verifier and deletes the row in one step. */
+  async consumePkceSession(sessionId: string): Promise<{
+    verifier: string;
+    expires_at: number;
+  } | null> {
+    const row = await this.db
+      .prepare('SELECT verifier, expires_at FROM pkce_sessions WHERE id = ?')
+      .bind(sessionId)
+      .first<{ verifier: string; expires_at: number }>();
+    if (!row) return null;
+    await this.db.prepare('DELETE FROM pkce_sessions WHERE id = ?').bind(sessionId).run();
+    return row;
+  }
+
+  /** Background cleanup — removes expired pkce_sessions rows. */
+  async cleanupExpiredPkceSessions(): Promise<number> {
+    const now = Math.floor(Date.now() / 1000);
+    const result = await this.db
+      .prepare('DELETE FROM pkce_sessions WHERE expires_at < ?')
+      .bind(now)
+      .run();
+    return result.meta.changes ?? 0;
   }
 
   /**

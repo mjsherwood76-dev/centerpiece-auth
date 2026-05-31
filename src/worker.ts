@@ -22,6 +22,7 @@ import { handleRegisterPage } from './pages/register.js';
 import { handleRegister } from './handlers/register.js';
 import { handleLogin } from './handlers/login.js';
 import { handleTokenExchange } from './handlers/token.js';
+import { handlePkceInit } from './handlers/pkceInit.js';
 import { handleRefresh } from './handlers/refresh.js';
 import { handleLogout, handleLogoutAll } from './handlers/logout.js';
 import { handleGoogleOAuthInit, handleGoogleOAuthCallback } from './oauth/google.js';
@@ -158,6 +159,11 @@ export default {
 
       if (method === 'POST' && path === '/api/token') {
         response = await handleTokenExchange(request, env);
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      if (method === 'POST' && path === '/api/pkce/init') {
+        response = await handlePkceInit(request, env);
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 

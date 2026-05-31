@@ -50,7 +50,7 @@ export async function handleAppleOAuthInit(request: Request, env: Env): Promise<
   const validation = await validateOAuthInitiation(request, env);
   if (validation instanceof Response) return validation;
 
-  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience, rememberDevice } = validation;
+  const { tenantId, redirectUrl, clientCodeChallenge, clientCodeChallengeMethod, audience, rememberDevice, pkceSessionId } = validation;
 
   // Create OAuth state with nonce (Apple supports OIDC)
   const { state, nonce } = await createOAuthState(
@@ -62,7 +62,8 @@ export async function handleAppleOAuthInit(request: Request, env: Env): Promise<
     clientCodeChallenge,
     clientCodeChallengeMethod,
     audience,
-    rememberDevice
+    rememberDevice,
+    pkceSessionId
   );
 
   // Build Apple authorization URL
