@@ -17,6 +17,7 @@ import { ConsoleJsonLogger } from './core/logger.js';
 import { RequestTrace } from './core/requestTrace.js';
 import { handleHealth } from './handlers/health.js';
 import { handleJWKS } from './handlers/jwks.js';
+import { handleWellKnownOauth } from './handlers/wellKnownOauth.js';
 import { handleLoginPage } from './pages/login.js';
 import { handleRegisterPage } from './pages/register.js';
 import { handleRegister } from './handlers/register.js';
@@ -111,6 +112,13 @@ export default {
       // --- JWKS (public key for JWT verification) ---
       if (method === 'GET' && path === '/.well-known/jwks.json') {
         response = await handleJWKS(env);
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      // --- OAuth Authorization Server Metadata (RFC 8414) ---
+      // Unauthenticated public metadata — placed before any redirect-validator middleware.
+      if (method === 'GET' && path === '/.well-known/oauth-authorization-server') {
+        response = handleWellKnownOauth(env);
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 

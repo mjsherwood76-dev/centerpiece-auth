@@ -60,6 +60,11 @@ export interface Env {
   // Production: "centerpiecelab.com"  Staging: "centerpiecelab.dev"
   PLATFORM_DOMAIN: string;
 
+  // Canonical issuer URL for OAuth Authorization Server Metadata (RFC 8414).
+  // Production: "https://auth.centerpiecelab.com"
+  // Staging:    "https://auth.centerpiecelab.dev"
+  AUTH_ISSUER_URL: string;
+
   // Secrets (OAuth providers — wired in Session 4)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
