@@ -165,3 +165,9 @@ test/
 ├── jwks.test.ts
 └── redirect-validation.test.ts
 ```
+
+---
+
+## Logging Policy
+
+Never log PII fields (email, phone, address, password, SSN, DOB, payment card data, firstName, lastName, full_name, auth tokens). Use opaque IDs (userId, tenantId) for debugging. CI greps `console.log` patterns against a PII denylist (`scripts/check-no-pii-logging.mjs`). To whitelist a deliberate case, add `// pii-allowed: <reason>` on the line immediately above the console call.

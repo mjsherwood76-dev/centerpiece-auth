@@ -183,6 +183,7 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
       const before = memberships.length;
       memberships = memberships.filter(m => m.context !== 'platform');
       if (memberships.length !== before) {
+        // pii-allowed: incident triage — logs email domain to confirm which address triggered the platform-context strip; security audit event, not operational PII
         console.warn('Token issuance: stripped platform context for non-allowed-domain email', {
           userId: user.id,
           email: user.email,
