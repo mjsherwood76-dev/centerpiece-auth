@@ -37,6 +37,7 @@ import { handleMemberships } from './handlers/memberships.js';
 import { handleSwitchTenant } from './handlers/switchTenant.js';
 import { handleStepUp } from './handlers/stepUp.js';
 import { handleInternalMemberships } from './handlers/internalMemberships.js';
+import { handleInternalCustomerAuth } from './handlers/internalCustomerAuth.js';
 import { handleInternalUserLookup } from './handlers/internalUsers.js';
 import { handleInternalCustomers } from './handlers/internalCustomers.js';
 import { handleInternalSessions } from './handlers/internalSessions.js';
@@ -334,6 +335,15 @@ export default {
           statusCode: response.status,
           correlationId,
         });
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      // Customer inline-login endpoints (Phase 3.20) — Service-Binding-only,
+      // called by centerpiece-site-runtime so tenant storefronts can serve
+      // /login, /register, /forgot-password on their own origin. The handler
+      // gates on X-CP-Internal-Secret and emits its own audit events.
+      if (method === 'POST' && path.startsWith('/api/internal/customer-')) {
+        response = await handleInternalCustomerAuth(request, env);
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
