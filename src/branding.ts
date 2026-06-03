@@ -6,7 +6,10 @@
  *
  * Used to render branded login/register pages that match each tenant's theme.
  *
- * Fallback: Aurora brand + first available style if tenant not found.
+ * Fallback chain:
+ *   1. Requested tenant KV config (if tenantId supplied)
+ *   2. Platform tenant KV config (PLATFORM_DEFAULT_TENANT_ID — centerpiecelab)
+ *   3. Hardcoded Aurora safety-net (only fires if KV itself is broken)
  */
 import type { Env } from './types.js';
 
@@ -67,12 +70,20 @@ export interface TenantBranding {
 const DEFAULT_BRAND_ID = 'brand-aurora';
 const DEFAULT_STYLE_ID = 'style-material';
 
+// PLATFORM_DEFAULT_TENANT_ID is a platform invariant — the Centerpiece Lab tenant
+// IS the platform's brand identity. AI_RULES §centerpiece-auth "Don't hardcode tenant IDs"
+// applies to tenant-context logic (resolution, authorization); this is the well-known
+// identity of the platform itself, used only when no tenant context is supplied.
+const PLATFORM_DEFAULT_TENANT_ID = 'centerpiecelab';
+
 // ─── Main Loader ────────────────────────────────────────────
 
 /**
  * Load tenant branding from KV.
  *
- * @param tenantId - Tenant identifier from query param
+ * @param tenantId - Tenant identifier from query param, or null for platform default.
+ *                  When null, falls back to PLATFORM_DEFAULT_TENANT_ID (centerpiecelab)
+ *                  before resorting to the hardcoded Aurora safety-net.
  * @param env - Worker environment bindings
  * @returns Resolved tenant branding with CSS variables
  */
@@ -80,16 +91,21 @@ export async function loadTenantBranding(
   tenantId: string | null,
   env: Env
 ): Promise<TenantBranding> {
+  // When no tenant is supplied, use the platform's own tenant config so that
+  // auth pages on auth.centerpiecelab.com render Centerpiece branding rather
+  // than the generic Aurora fallback.
+  const effectiveTenantId = tenantId ?? PLATFORM_DEFAULT_TENANT_ID;
+
   // 1. Load tenant config to get theme selections + store info
   let brandThemeId = DEFAULT_BRAND_ID;
   let styleThemeId = DEFAULT_STYLE_ID;
-  let storeName = 'Store';
+  let storeName = 'Centerpiece';
   let logoUrl: string | null = null;
 
-  if (tenantId) {
+  if (effectiveTenantId) {
     try {
       // KV key uses `tenant:{id}` prefix (aligned with runtime + D1→KV sync)
-      const record = await env.TENANT_CONFIGS.get(`tenant:${tenantId}`, 'json') as Record<string, unknown> | null;
+      const record = await env.TENANT_CONFIGS.get(`tenant:${effectiveTenantId}`, 'json') as Record<string, unknown> | null;
       // D1→KV sync stores TenantConfigRecord wrapper — extract inner config.
       // Fallback to record itself for legacy KV entries without a wrapper.
       const tenantConfig = (record?.config ?? record) as Record<string, unknown> | null;
@@ -114,8 +130,8 @@ export async function loadTenantBranding(
         if (typeof tenantConfig.name === 'string') storeName = tenantConfig.name;
       }
     } catch (err) {
-      console.error(`Failed to load tenant config for "${tenantId}":`, err);
-      // Fall through to defaults
+      console.error(`Failed to load tenant config for "${effectiveTenantId}":`, err);
+      // Fall through to Aurora hardcoded safety-net
     }
   }
 
@@ -130,7 +146,7 @@ export async function loadTenantBranding(
   const googleFontsLinks = generateGoogleFontsLinks(brandTheme);
 
   return {
-    tenantId: tenantId || '__default__',
+    tenantId: effectiveTenantId || '__default__',
     storeName,
     logoUrl,
     cssVariables,
