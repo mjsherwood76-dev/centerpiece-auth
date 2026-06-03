@@ -42,6 +42,7 @@ import { handleInternalCustomers } from './handlers/internalCustomers.js';
 import { handleInternalSessions } from './handlers/internalSessions.js';
 import { handleImpersonate } from './handlers/impersonate.js';
 import { handleCustomerRoutes } from './handlers/customers.js';
+import { handleAdminOauthClientRoutes } from './handlers/adminOauthClients.js';
 import { checkRateLimit } from './security/rateLimit.js';
 import { addSecurityHeaders, handleCorsPreflightValidated } from './security/headers.js';
 import { logAuthEvent } from './security/auditLog.js';
@@ -265,6 +266,15 @@ export default {
         const customerResponse = await handleCustomerRoutes(request, env);
         if (customerResponse) {
           return addSecurityHeaders(customerResponse, trace.getResponseHeaders(), request, env);
+        }
+      }
+
+      // --- Platform-Admin OAuth Third-Party Client Registry (Phase 3.18 Session 5) ---
+      // Called via platform-api → AUTH Service Binding; gated by platform-admin JWT.
+      if (path.startsWith('/admin/oauth/clients')) {
+        const oauthClientResponse = await handleAdminOauthClientRoutes(request, env, correlationId);
+        if (oauthClientResponse) {
+          return addSecurityHeaders(oauthClientResponse, trace.getResponseHeaders(), request, env);
         }
       }
 
