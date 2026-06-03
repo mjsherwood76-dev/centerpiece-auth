@@ -29,7 +29,7 @@ import {
   generateUUID,
   buildRefreshCookieHeader,
 } from '../crypto/refreshTokens.js';
-import { validateRedirectUrl } from '../security/redirectValidator.js';
+import { validateRedirectUrl, AUTH_CONSENT_TENANT } from '../security/redirectValidator.js';
 import { isAdminDomain } from '../security/platformDomains.js';
 import { parseRequestBody } from '../util/parseRequestBody.js';
 import { buildDeviceLabel, buildDeviceFingerprint } from '../security/deviceLabel.js';
@@ -74,7 +74,10 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
     return errorRedirect(env, tenantParam, '', 'invalid_redirect');
   }
 
-  const redirectValidation = await validateRedirectUrl(redirectUrl, env.TENANT_CONFIGS, env.ENVIRONMENT);
+  // env.AUTH_DOMAIN is passed as the auth-consent origin so the auth server's
+  // own /oauth/authorize URL (third-party consent flow) is an accepted return
+  // target; all other redirects still require a known tenant domain.
+  const redirectValidation = await validateRedirectUrl(redirectUrl, env.TENANT_CONFIGS, env.ENVIRONMENT, env.AUTH_DOMAIN);
   if (!redirectValidation.valid) {
     return errorRedirect(env, tenantParam, '', 'invalid_redirect');
   }
@@ -105,6 +108,42 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   const passwordValid = await verifyPassword(password, user.password_hash);
   if (!passwordValid) {
     return errorRedirect(env, tenantParam, redirectUrl, 'invalid_credentials');
+  }
+
+  // ── Consent-flow session-only login (Phase 3.18 third-party OAuth consent) ──
+  // When the return URL is the auth server's own /oauth/authorize endpoint, we
+  // only need to establish an auth-domain session (cp_refresh) and send the
+  // seller straight back to the authorize endpoint — NO tenant membership and
+  // NO storefront auth code (those are storefront concepts). The authorize
+  // endpoint then sees the live session and renders the consent screen.
+  if (redirectValidation.tenantId === AUTH_CONSENT_TENANT) {
+    const sNow = Math.floor(Date.now() / 1000);
+    const sRefreshToken = generateRefreshToken();
+    const sRefreshTtlDays = rememberDevice
+      ? parseInt(env.REFRESH_TOKEN_TTL_DAYS_REMEMBERED || '90', 10)
+      : parseInt(env.REFRESH_TOKEN_TTL_DAYS || '30', 10);
+    const sUa = request.headers.get('User-Agent');
+    await db.insertRefreshToken({
+      id: generateUUID(),
+      user_id: user.id,
+      token_hash: await hashRefreshToken(sRefreshToken),
+      family_id: generateUUID(),
+      expires_at: sNow + sRefreshTtlDays * 24 * 60 * 60,
+      ip: request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For'),
+      user_agent: sUa,
+      device_remembered: rememberDevice ? 1 : 0,
+      device_label: buildDeviceLabel(sUa),
+      device_fingerprint: await buildDeviceFingerprint(sUa, request.headers.get('CF-IPCountry')),
+      login_iat: sNow,
+    });
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: redirectUrl, // the validated auth-origin /oauth/authorize URL
+        'Set-Cookie': buildRefreshCookieHeader(sRefreshToken, sRefreshTtlDays, env.AUTH_DOMAIN),
+        'Cache-Control': 'no-store',
+      },
+    });
   }
 
   // ── Derive tenant ID from redirect URL ──

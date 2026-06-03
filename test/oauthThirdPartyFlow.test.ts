@@ -10,7 +10,7 @@
  *
  * Covered:
  *   authorize: invalid client → error page (400); valid → 200 consent; scope NOT
- *              subset → redirect with error; not-logged-in → 302 to /login?next=.
+ *              subset → redirect with error; not-logged-in → 302 to /login?redirect=.
  *   decision:  Allow → 302 with code; Deny → 302 with error=access_denied.
  *   token:     valid code + PKCE → 200 + access/refresh; expired code → invalid_grant;
  *              replayed code → invalid_grant; mismatched verifier → invalid_grant;
@@ -323,7 +323,7 @@ describe('GET /oauth/authorize', () => {
     assert.equal(new URL(res.headers.get('Location')!).searchParams.get('error'), 'invalid_request');
   });
 
-  it('not logged in → 302 to /login?next=<authorize url>', async () => {
+  it('not logged in → 302 to /login?redirect=<authorize url>', async () => {
     const db = new MockDB();
     const env = makeEnv(db);
     await seed(db);
@@ -331,7 +331,11 @@ describe('GET /oauth/authorize', () => {
     assert.equal(res.status, 302);
     const loc = new URL(res.headers.get('Location')!);
     assert.equal(loc.pathname, '/login');
-    assert.ok(loc.searchParams.get('next')?.includes('/oauth/authorize'));
+    // The login page reads `redirect` (not `next`); the credential login handler
+    // recognises this auth-origin /oauth/authorize URL as a session-only consent
+    // login and returns the seller here after authenticating.
+    assert.ok(loc.searchParams.get('redirect')?.includes('/oauth/authorize'));
+    assert.equal(loc.searchParams.get('next'), null);
   });
 });
 

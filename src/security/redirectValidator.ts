@@ -18,6 +18,19 @@ import { CONTROLLED_SUFFIXES } from './platformDomains.js';
 /** Dev-only allowed origins (http localhost). */
 const DEV_HOSTS = ['localhost', '127.0.0.1'];
 
+/**
+ * Sentinel tenantId returned when the redirect target is the auth server's OWN
+ * `/oauth/authorize` endpoint (the Phase 3.18 third-party consent flow bounces
+ * an unauthenticated seller to `/login?redirect=<authorize url>` and expects to
+ * return there after login). This is a same-origin internal redirect, NOT a
+ * tenant storefront, so callers must treat it specially (no tenant membership,
+ * no storefront auth code — just establish a session and return).
+ */
+export const AUTH_CONSENT_TENANT = '__auth_consent__';
+
+/** Only this exact path on the auth origin is an allowed same-origin redirect. */
+const AUTH_CONSENT_PATH = '/oauth/authorize';
+
 export interface RedirectValidationResult {
   valid: boolean;
   origin: string;
@@ -35,7 +48,8 @@ export interface RedirectValidationResult {
 export async function validateRedirectUrl(
   redirectUrl: string,
   tenantConfigs: KVNamespace,
-  environment: string
+  environment: string,
+  authConsentOrigin?: string
 ): Promise<RedirectValidationResult> {
   const invalid = (error: string): RedirectValidationResult => ({
     valid: false,
@@ -55,6 +69,19 @@ export async function validateRedirectUrl(
   // 2. Reject dangerous schemes
   if (url.protocol === 'javascript:') {
     return invalid('Rejected javascript: URI');
+  }
+
+  // 2a. Same-origin auth-consent allowance.
+  // The auth server's OWN /oauth/authorize endpoint is a legitimate post-login
+  // return target for the third-party consent flow. It is allowed ONLY when the
+  // caller opts in (passes its own origin) AND the URL is an exact origin match
+  // to that origin with the exact /oauth/authorize path. This cannot be abused
+  // as an open redirect: the target is the auth server itself, and the authorize
+  // endpoint independently re-validates the third-party client's redirect_uri
+  // against the client's allow-list. Checked before tenant-domain rules so the
+  // auth host (not a tenant) is not rejected as an unknown domain.
+  if (authConsentOrigin && url.origin === authConsentOrigin && url.pathname === AUTH_CONSENT_PATH) {
+    return { valid: true, origin: url.origin, tenantId: AUTH_CONSENT_TENANT };
   }
 
   // 3. Require https: (allow http: for localhost in non-production)

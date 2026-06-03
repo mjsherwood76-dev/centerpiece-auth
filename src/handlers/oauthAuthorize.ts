@@ -201,9 +201,12 @@ export async function handleOauthAuthorize(request: Request, env: Env): Promise<
   const now = Math.floor(Date.now() / 1000);
   const userId = await resolveSessionUserId(request, db, now);
   if (!userId) {
-    // Not logged in → bounce to login with next=<this authorize url>.
+    // Not logged in → bounce to login. The login page reads the `redirect`
+    // query param (not `next`); the credential login handler recognises this
+    // auth-origin /oauth/authorize URL as a session-only consent login and
+    // returns the seller here after authenticating.
     const loginUrl = new URL('/login', env.AUTH_DOMAIN);
-    loginUrl.searchParams.set('next', url.toString());
+    loginUrl.searchParams.set('redirect', url.toString());
     return new Response(null, {
       status: 302,
       headers: { Location: loginUrl.toString(), 'Cache-Control': 'no-store' },
