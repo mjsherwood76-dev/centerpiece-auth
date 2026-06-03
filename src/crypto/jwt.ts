@@ -49,6 +49,12 @@ export interface JwtClaims {
   // Impersonation claims (present only on impersonation tokens)
   impersonatedBy?: string;         // admin userId who initiated impersonation
   sessionType?: 'impersonation';   // marks this as an impersonation token
+  // Delegated-agent claim (present only on tokens issued via the third-party
+  // OAuth authorize-flow, Phase 3.18 Session 6). Identifies the registered
+  // OAuth client acting on the seller's behalf. Resource servers (platform-api)
+  // ignore it until Phase 5.7 wires per-agent RBAC. See TODO(5.7) at the
+  // issuance site in handlers/oauthToken.ts.
+  act_as?: { client_id: string };
 }
 
 /**
@@ -235,6 +241,7 @@ export async function signJwt(
   if (payload.step_up_for !== undefined) fullPayload.step_up_for = payload.step_up_for;
   if (payload.impersonatedBy !== undefined) fullPayload.impersonatedBy = payload.impersonatedBy;
   if (payload.sessionType !== undefined) fullPayload.sessionType = payload.sessionType;
+  if (payload.act_as !== undefined) fullPayload.act_as = payload.act_as;
 
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(fullPayload));

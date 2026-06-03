@@ -43,6 +43,8 @@ import { handleInternalSessions } from './handlers/internalSessions.js';
 import { handleImpersonate } from './handlers/impersonate.js';
 import { handleCustomerRoutes } from './handlers/customers.js';
 import { handleAdminOauthClientRoutes } from './handlers/adminOauthClients.js';
+import { handleOauthAuthorize, handleOauthAuthorizeDecision } from './handlers/oauthAuthorize.js';
+import { handleOauthToken } from './handlers/oauthToken.js';
 import { checkRateLimit } from './security/rateLimit.js';
 import { addSecurityHeaders, handleCorsPreflightValidated } from './security/headers.js';
 import { logAuthEvent } from './security/auditLog.js';
@@ -120,6 +122,49 @@ export default {
       // Unauthenticated public metadata — placed before any redirect-validator middleware.
       if (method === 'GET' && path === '/.well-known/oauth-authorization-server') {
         response = handleWellKnownOauth(env);
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      // --- Third-Party OAuth Authorize / Consent / Token (RFC 6749 + PKCE) ---
+      // Phase 3.18 Session 6. Seller-facing authorize + consent, client-facing
+      // token exchange. Authorize/decision produce redirects to the verified
+      // client redirect_uri; both run redirect validation internally.
+      if (method === 'GET' && path === '/oauth/authorize') {
+        response = await handleOauthAuthorize(request, env);
+        logAuthEvent(logger, {
+          event: 'oauth_authorize',
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          statusCode: response.status,
+          correlationId,
+        });
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      if (method === 'POST' && path === '/oauth/authorize/decision') {
+        response = await handleOauthAuthorizeDecision(request, env);
+        logAuthEvent(logger, {
+          event: 'oauth_authorize_decision',
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          statusCode: response.status,
+          correlationId,
+        });
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      if (method === 'POST' && path === '/oauth/token') {
+        response = await handleOauthToken(request, env);
+        logAuthEvent(logger, {
+          event: 'oauth_token',
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          statusCode: response.status,
+          correlationId,
+        });
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
