@@ -56,6 +56,10 @@ export interface Env {
   // Staging:    "centerpiecelab.com,centerpiecelab.dev"
   PLATFORM_OWNER_EMAIL_DOMAINS: string;
 
+  // Platform domain for legal footer links (privacy / terms / cookies).
+  // Production: "centerpiecelab.com"  Staging: "centerpiecelab.dev"
+  PLATFORM_DOMAIN: string;
+
   // Secrets (OAuth providers — wired in Session 4)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;

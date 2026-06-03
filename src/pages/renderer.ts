@@ -8,11 +8,12 @@
  * Features:
  * - Tenant-branded CSS variables (light + dark mode)
  * - Tenant logo in simplified header
+ * - Optional "back to {tenant}" header link (omitted on platform-default path)
  * - FOUC prevention script
  * - Dark mode toggle
  * - Responsive layout, accessible markup
  * - Simplified header (logo + store name, no navigation)
- * - Footer (copyright only)
+ * - Footer with legal link cluster (Privacy / Terms / Cookies) + copyright
  */
 import type { TenantBranding } from '../branding.js';
 
@@ -24,10 +25,40 @@ export interface AuthPageContent {
 }
 
 /**
- * Render a complete HTML document for an auth page.
+ * Optional "back to {tenant}" link rendered in the header.
+ * Caller is responsible for validating href via redirectValidator.ts
+ * before constructing this object.
  */
-export function renderAuthPage(branding: TenantBranding, content: AuthPageContent): string {
+export interface BackLink {
+  /** Redirect-validated tenant origin URL. */
+  href: string;
+  /** Display label, e.g. "Back to Sherwood Creative". */
+  label: string;
+}
+
+/**
+ * Render a complete HTML document for an auth page.
+ *
+ * @param branding - Tenant branding (CSS variables, logo, store name)
+ * @param content - Page title + form body HTML
+ * @param platformDomain - Platform domain for legal footer links (e.g. "centerpiecelab.com")
+ * @param backLink - Optional validated back-link for tenant-context pages
+ */
+export function renderAuthPage(
+  branding: TenantBranding,
+  content: AuthPageContent,
+  platformDomain: string,
+  backLink?: BackLink
+): string {
   const pageTitle = `${content.title} — ${escapeHtml(branding.storeName)}`;
+  const currentYear = new Date().getFullYear();
+
+  const backLinkHtml = backLink
+    ? `<a href="${escapeAttr(backLink.href)}" class="auth-header__back">
+      <svg class="auth-header__back-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+      ${escapeHtml(backLink.label)}
+    </a>`
+    : '';
 
   return `<!DOCTYPE html>
 <html lang="en" data-mode="light">
@@ -36,6 +67,7 @@ export function renderAuthPage(branding: TenantBranding, content: AuthPageConten
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${pageTitle}</title>
   <meta name="robots" content="noindex, nofollow">
+  ${branding.logoUrl ? `<link rel="icon" type="image/png" href="${escapeAttr(branding.logoUrl)}">` : '<link rel="icon" href="/favicon.ico">'}
   ${branding.googleFontsLinks}
   <style>
 ${branding.cssVariables}
@@ -91,6 +123,30 @@ body {
   letter-spacing: -0.01em;
 }
 
+.auth-header__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+  text-decoration: none;
+  transition: color var(--motion-fast, 150ms) var(--motion-ease, ease);
+}
+
+.auth-header__back:hover {
+  color: hsl(var(--foreground));
+}
+
+.auth-header__back:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.auth-header__back-icon {
+  flex-shrink: 0;
+}
+
 /* ─── Dark Mode Toggle ─── */
 .mode-toggle {
   appearance: none;
@@ -103,8 +159,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background var(--motion-fast, 150ms) var(--motion-ease, ease),
-              border-color var(--motion-fast, 150ms) var(--motion-ease, ease);
+  transition: background var(--motion-base, 250ms) var(--motion-ease, ease),
+              border-color var(--motion-base, 250ms) var(--motion-ease, ease);
 }
 
 .mode-toggle:hover {
@@ -362,9 +418,39 @@ body {
 .auth-footer {
   padding: 1rem 1.5rem;
   text-align: center;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.auth-footer__legal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   font-size: 0.75rem;
   color: hsl(var(--muted-foreground));
-  border-top: 1px solid hsl(var(--border));
+  margin-bottom: 0.375rem;
+}
+
+.auth-footer__legal a {
+  color: hsl(var(--muted-foreground));
+  text-decoration: none;
+  transition: color var(--motion-fast, 150ms) var(--motion-ease, ease);
+}
+
+.auth-footer__legal a:hover {
+  color: hsl(var(--foreground));
+  text-decoration: underline;
+}
+
+.auth-footer__legal a:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.auth-footer__copyright {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
 }
 
 /* ─── Responsive ─── */
@@ -401,10 +487,13 @@ body {
       ${branding.logoUrl ? `<img class="auth-header__logo" src="${escapeAttr(branding.logoUrl)}" alt="${escapeAttr(branding.storeName)} logo">` : ''}
       <span class="auth-header__name">${escapeHtml(branding.storeName)}</span>
     </span>
-    <button class="mode-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">
-      <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-    </button>
+    <div class="auth-header__actions">
+      ${backLinkHtml}
+      <button class="mode-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">
+        <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      </button>
+    </div>
   </header>
 
   <!-- Main Content -->
@@ -416,7 +505,14 @@ body {
 
   <!-- Footer -->
   <footer class="auth-footer">
-    &copy; ${new Date().getFullYear()} ${escapeHtml(branding.storeName)}. All rights reserved.
+    <div class="auth-footer__legal">
+      <a href="https://${escapeAttr(platformDomain)}/policies/privacy">Privacy</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://${escapeAttr(platformDomain)}/policies/terms">Terms</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://${escapeAttr(platformDomain)}/policies/cookies">Cookies</a>
+    </div>
+    <div class="auth-footer__copyright">&copy; ${currentYear} ${escapeHtml(branding.storeName)}</div>
   </footer>
 
   <!-- Dark Mode Toggle Script -->

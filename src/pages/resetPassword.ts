@@ -32,7 +32,7 @@ export async function handleResetPasswordPage(request: Request, env: Env): Promi
 
   const pageTitle = token ? 'Reset Password' : 'Forgot Password';
 
-  const html = renderAuthPage(branding, { title: pageTitle, body });
+  const html = renderAuthPage(branding, { title: pageTitle, body }, env.PLATFORM_DOMAIN);
 
   return new Response(html, {
     status: 200,

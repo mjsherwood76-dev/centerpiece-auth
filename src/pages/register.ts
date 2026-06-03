@@ -134,7 +134,7 @@ export async function handleRegisterPage(request: Request, env: Env): Promise<Re
     })();
   </script>`;
 
-  const html = renderAuthPage(branding, { title: 'Create Account', body: body + clientScript });
+  const html = renderAuthPage(branding, { title: 'Create Account', body: body + clientScript }, env.PLATFORM_DOMAIN);
 
   return new Response(html, {
     status: 200,

@@ -14,8 +14,9 @@
  */
 import type { Env } from '../types.js';
 import { loadTenantBranding } from '../branding.js';
-import { renderAuthPage, oauthIcons, escapeHtml, escapeAttr } from './renderer.js';
+import { renderAuthPage, type BackLink, oauthIcons, escapeHtml, escapeAttr } from './renderer.js';
 import { isAdminDomain } from '../security/platformDomains.js';
+import { validateRedirectUrl } from '../security/redirectValidator.js';
 
 /**
  * Handle GET /login — render the branded login page.
@@ -63,6 +64,28 @@ export async function handleLoginPage(request: Request, env: Env): Promise<Respo
   }
 
   const branding = await loadTenantBranding(tenant, env);
+
+  // Build an optional back-link for storefront redirects.
+  // Only shown when the redirect is a validated tenant origin (not admin console).
+  // Per AI_RULES §centerpiece-auth: every redirect-producing code path runs through
+  // redirectValidator before constructing URLs derived from user-supplied input.
+  let backLink: BackLink | undefined;
+  if (redirect && audience !== 'admin') {
+    try {
+      const validated = await validateRedirectUrl(redirect, env.TENANT_CONFIGS, env.ENVIRONMENT);
+      if (validated.valid) {
+        const redirectHostname = new URL(redirect).hostname;
+        if (!isAdminDomain(redirectHostname)) {
+          backLink = {
+            href: validated.origin,
+            label: `Back to ${branding.storeName}`,
+          };
+        }
+      }
+    } catch {
+      // Invalid redirect URL — back-link omitted; auth flow continues normally.
+    }
+  }
 
   // Build OAuth URLs — include PKCE params so they flow through the OAuth state
   const oauthBase = `${env.AUTH_DOMAIN}/oauth`;
@@ -153,7 +176,7 @@ export async function handleLoginPage(request: Request, env: Env): Promise<Respo
     </p>
   `;
 
-  const html = renderAuthPage(branding, { title: 'Sign In', body });
+  const html = renderAuthPage(branding, { title: 'Sign In', body }, env.PLATFORM_DOMAIN, backLink);
 
   return new Response(html, {
     status: 200,
