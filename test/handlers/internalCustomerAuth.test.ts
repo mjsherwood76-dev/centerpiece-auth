@@ -17,6 +17,9 @@
  * - success body shape { accessToken, refreshToken, expiresIn, user }
  * - register email_exists conflict
  * - forgot-password constant { ok: true }
+ * - customer-refresh rotation: new tokens on valid refresh, theft detection on
+ *   reuse (revoked token → family revoked → 401), expiry → 401 (Phase 3.20 S3)
+ * - customer-logout: revokes the presented refresh token, idempotent ok:true
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,10 +59,20 @@ interface UserRecord {
   updated_at: string;
 }
 
+interface RefreshTokenRecord {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  family_id: string;
+  expires_at: number;
+  revoked_at: string | null;
+  login_iat: number;
+}
+
 interface Store {
   users: UserRecord[];
   memberships: Array<{ id: string; user_id: string; tenant_id: string; context: string; sub_role: string | null }>;
-  refreshTokens: Array<Record<string, unknown>>;
+  refreshTokens: RefreshTokenRecord[];
   resetTokens: Array<Record<string, unknown>>;
   tenants: Array<{ id: string; name: string; domain: string; status: string }>;
 }
@@ -86,9 +99,28 @@ function buildAuthDb(store: Store): D1Database {
         if (lower.startsWith('select * from users where id')) {
           return (store.users.find(u => u.id === args[0]) ?? null) as T | null;
         }
+        if (lower.startsWith('select * from refresh_tokens where token_hash')) {
+          return (store.refreshTokens.find(t => t.token_hash === args[0]) ?? null) as T | null;
+        }
         return null as T | null;
       },
       run: async () => {
+        if (lower.startsWith('update refresh_tokens set revoked_at')) {
+          // Two shapes: WHERE token_hash = ? [AND revoked_at IS NULL]  (single revoke / rotate-revoke)
+          //             WHERE family_id = ? AND revoked_at IS NULL      (family revoke)
+          if (lower.includes('where family_id')) {
+            const familyId = String(args[0]);
+            for (const t of store.refreshTokens) {
+              if (t.family_id === familyId && t.revoked_at === null) t.revoked_at = 'now';
+            }
+          } else {
+            const hash = String(args[0]);
+            for (const t of store.refreshTokens) {
+              if (t.token_hash === hash && t.revoked_at === null) t.revoked_at = 'now';
+            }
+          }
+          return { meta: { changes: 1 } } as unknown as D1Result;
+        }
         if (lower.startsWith('insert into users')) {
           store.users.push({
             id: String(args[0]),
@@ -113,7 +145,15 @@ function buildAuthDb(store: Store): D1Database {
             });
           }
         } else if (lower.startsWith('insert into refresh_tokens')) {
-          store.refreshTokens.push({ args });
+          store.refreshTokens.push({
+            id: String(args[0]),
+            user_id: String(args[1]),
+            token_hash: String(args[2]),
+            family_id: String(args[3]),
+            expires_at: Number(args[4]),
+            revoked_at: null,
+            login_iat: Number(args[10] ?? 0),
+          });
         } else if (lower.startsWith('insert into password_reset_tokens')) {
           store.resetTokens.push({ token_hash: args[0], user_id: args[1], expires_at: args[2] });
         }
@@ -192,6 +232,26 @@ function mockEnv(store: Store): Env {
 
 // PBKDF2 hash (matches src/crypto/passwords.ts) — used to seed a known user.
 import { hashPassword } from '../../src/crypto/passwords.js';
+// SHA-256 refresh-token hashing — used to seed a known refresh token whose
+// plaintext we control, so the refresh/logout tests can present it.
+import { hashRefreshToken } from '../../src/crypto/refreshTokens.js';
+
+const NOW = () => Math.floor(Date.now() / 1000);
+
+async function seedRefreshToken(
+  store: Store,
+  opts: { userId: string; plaintext: string; familyId?: string; expiresAt?: number; revoked?: boolean },
+): Promise<void> {
+  store.refreshTokens.push({
+    id: `rt-${store.refreshTokens.length}`,
+    user_id: opts.userId,
+    token_hash: await hashRefreshToken(opts.plaintext),
+    family_id: opts.familyId ?? 'fam-1',
+    expires_at: opts.expiresAt ?? NOW() + 86400,
+    revoked_at: opts.revoked ? 'now' : null,
+    login_iat: NOW(),
+  });
+}
 
 function makeRequest(path: string, body: unknown, secret?: string): Request {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -403,5 +463,157 @@ describe('POST /api/internal/customer-forgot-password', () => {
     assert.equal(res.status, 200);
     const body = await res.json() as Record<string, boolean>;
     assert.equal(body.ok, true);
+  });
+});
+
+// ─── Refresh (rotation + theft detection) ───────────────────
+
+describe('POST /api/internal/customer-refresh', () => {
+  function seedUser(store: Store): void {
+    store.users.push({
+      id: 'u1', email: 'jane@b.com', password_hash: null,
+      name: 'Jane', email_verified: 1, avatar_url: null, created_at: '', updated_at: '',
+    });
+  }
+
+  it('rotates a valid refresh token and issues a new access + refresh', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    seedUser(store);
+    await seedRefreshToken(store, { userId: 'u1', plaintext: 'old-refresh-token' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-refresh',
+        { refreshToken: 'old-refresh-token', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      accessToken: string; refreshToken: string; expiresIn: number;
+      user: { id: string; email: string; displayName: string };
+    };
+    assert.ok(body.accessToken.split('.').length === 3, 'new access token is a JWT');
+    assert.ok(body.refreshToken.length >= 32, 'new refresh token present');
+    assert.notEqual(body.refreshToken, 'old-refresh-token', 'refresh token rotated');
+    assert.equal(body.expiresIn, 900);
+    assert.deepEqual(body.user, { id: 'u1', email: 'jane@b.com', displayName: 'Jane' });
+
+    // Old token revoked; new token persisted in the same family.
+    const oldHash = await hashRefreshToken('old-refresh-token');
+    const newHash = await hashRefreshToken(body.refreshToken);
+    const oldRow = store.refreshTokens.find(t => t.token_hash === oldHash)!;
+    const newRow = store.refreshTokens.find(t => t.token_hash === newHash)!;
+    assert.notEqual(oldRow.revoked_at, null, 'old refresh token revoked');
+    assert.equal(newRow.revoked_at, null, 'new refresh token active');
+    assert.equal(newRow.family_id, oldRow.family_id, 'rotation stays in same family');
+  });
+
+  it('returns 401 invalid_refresh for an unknown token', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-refresh',
+        { refreshToken: 'does-not-exist', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 401);
+    const body = await res.json() as Record<string, string>;
+    assert.equal(body.error, 'invalid_refresh');
+  });
+
+  it('detects reuse of a revoked token and revokes the whole family', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    seedUser(store);
+    // Two tokens in the same family; the presented one is already revoked (reuse).
+    await seedRefreshToken(store, { userId: 'u1', plaintext: 'stolen', familyId: 'fam-x', revoked: true });
+    await seedRefreshToken(store, { userId: 'u1', plaintext: 'sibling', familyId: 'fam-x' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-refresh',
+        { refreshToken: 'stolen', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 401);
+    const body = await res.json() as Record<string, string>;
+    assert.equal(body.error, 'invalid_refresh');
+
+    // Theft detection: the still-active sibling in the family is now revoked.
+    const siblingHash = await hashRefreshToken('sibling');
+    const sibling = store.refreshTokens.find(t => t.token_hash === siblingHash)!;
+    assert.notEqual(sibling.revoked_at, null, 'family revoked on reuse');
+  });
+
+  it('returns 401 invalid_refresh for an expired token', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    seedUser(store);
+    await seedRefreshToken(store, { userId: 'u1', plaintext: 'expired-token', expiresAt: NOW() - 10 });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-refresh',
+        { refreshToken: 'expired-token', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 401);
+  });
+
+  it('rejects when tenantOrigin does not match the tenant', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    seedUser(store);
+    await seedRefreshToken(store, { userId: 'u1', plaintext: 'tok' });
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-refresh',
+        { refreshToken: 'tok', tenantId: TENANT.id, tenantOrigin: 'https://attacker.example' },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 400);
+  });
+});
+
+// ─── Logout (server-side revoke) ────────────────────────────
+
+describe('POST /api/internal/customer-logout', () => {
+  it('revokes the presented refresh token and returns ok:true', async () => {
+    const store = newStore();
+    await seedRefreshToken(store, { userId: 'u1', plaintext: 'live-token' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-logout', { refreshToken: 'live-token' }, INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 200);
+    const body = await res.json() as Record<string, boolean>;
+    assert.equal(body.ok, true);
+
+    const liveHash = await hashRefreshToken('live-token');
+    const row = store.refreshTokens.find(t => t.token_hash === liveHash)!;
+    assert.notEqual(row.revoked_at, null, 'refresh token revoked on logout');
+  });
+
+  it('returns ok:true even when no/unknown token is presented (idempotent)', async () => {
+    const store = newStore();
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-logout', {}, INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 200);
+    const body = await res.json() as Record<string, boolean>;
+    assert.equal(body.ok, true);
+  });
+
+  it('still requires the internal secret', async () => {
+    const store = newStore();
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-logout', { refreshToken: 'x' }),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 403);
   });
 });

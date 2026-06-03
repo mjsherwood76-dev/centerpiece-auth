@@ -11,18 +11,29 @@
  *   POST /api/internal/customer-login            — verify password, issue tokens
  *   POST /api/internal/customer-register         — create user + customer membership
  *   POST /api/internal/customer-forgot-password  — send branded reset email
+ *   POST /api/internal/customer-refresh          — rotate refresh + issue new access (Phase 3.20 S3)
+ *   POST /api/internal/customer-logout           — revoke refresh server-side (Phase 3.20 S3)
  *
  * Contract (consumed by runtime S2/S3):
  *   Request bodies (JSON):
  *     login:    { email, password, tenantId, tenantOrigin }
  *     register: { email, password, tenantId, tenantOrigin, displayName? }
  *     forgot:   { email, tenantId, tenantOrigin }
- *   Success (login + register), 200:
+ *     refresh:  { refreshToken, tenantId, tenantOrigin }
+ *     logout:   { refreshToken }
+ *   Success (login + register + refresh), 200:
  *     { accessToken, refreshToken, expiresIn, user: { id, email, displayName } }
  *   Failure:
  *     login    → 401 { error: 'invalid_credentials' }  (constant message)
  *     register → 409 { error: 'email_exists' }
  *     forgot   → 200 { ok: true }                       (unconditional)
+ *     refresh  → 401 { error: 'invalid_refresh' }       (any rotation/theft/expiry failure)
+ *     logout   → 200 { ok: true }                       (unconditional; idempotent)
+ *
+ * Refresh rotation + theft detection reuse the EXISTING D1 rotation primitives
+ * (db.rotateRefreshToken / db.revokeRefreshTokenFamily) — the same machinery
+ * the auth-domain silent-refresh flow uses. This endpoint is a thin Service-
+ * Binding wrapper over them; rotation semantics are NOT reimplemented here.
  *
  * Security:
  * - Every endpoint is gated by X-CP-Internal-Secret (constant-time compare via
@@ -79,6 +90,16 @@ interface CustomerForgotRequest {
   email?: string;
   tenantId?: string;
   tenantOrigin?: string;
+}
+
+interface CustomerRefreshRequest {
+  refreshToken?: string;
+  tenantId?: string;
+  tenantOrigin?: string;
+}
+
+interface CustomerLogoutRequest {
+  refreshToken?: string;
 }
 
 /** Success body shared by login + register. S3 reads these to set cookies. */
@@ -139,14 +160,18 @@ async function validateTenantOrigin(
  * in S3. This is the same token machinery as the auth-domain login flow; only
  * the delivery mechanism differs (direct return vs auth-code redirect).
  */
-async function issueCustomerTokens(
-  request: Request,
+/**
+ * Sign a customer access token (ES256 JWT, aud: storefront). Extracted so the
+ * refresh endpoint can mint a fresh access token on rotation without duplicating
+ * the claim factory. The claim shape is identical to the auth-domain customer
+ * token — the runtime's existing JWKS verifier reads it unchanged (S3 step 4).
+ */
+async function signCustomerAccessToken(
   env: Env,
   user: { id: string; email: string; name: string },
-): Promise<CustomerAuthSuccess> {
-  const ttlSeconds = parseInt(env.ACCESS_TOKEN_TTL_SECONDS || '900', 10);
-
-  const accessToken = await signJwt(
+  ttlSeconds: number,
+): Promise<string> {
+  return signJwt(
     buildCustomerJwtPayload({
       userId: user.id,
       email: user.email,
@@ -156,6 +181,16 @@ async function issueCustomerTokens(
     env.JWT_PRIVATE_KEY,
     ttlSeconds,
   );
+}
+
+async function issueCustomerTokens(
+  request: Request,
+  env: Env,
+  user: { id: string; email: string; name: string },
+): Promise<CustomerAuthSuccess> {
+  const ttlSeconds = parseInt(env.ACCESS_TOKEN_TTL_SECONDS || '900', 10);
+
+  const accessToken = await signCustomerAccessToken(env, user, ttlSeconds);
 
   const refreshToken = generateRefreshToken();
   const refreshTokenHash = await hashRefreshToken(refreshToken);
@@ -417,6 +452,170 @@ async function handleCustomerForgotPassword(request: Request, env: Env): Promise
   return jsonResponse({ ok: true }, 200);
 }
 
+// ─── POST /api/internal/customer-refresh ────────────────────
+
+/**
+ * Rotate a customer refresh token and mint a fresh access token.
+ *
+ * Reuses the existing rotation primitives (db.getRefreshTokenByHash +
+ * db.rotateRefreshToken) which implement reuse/theft detection identically to
+ * the auth-domain silent-refresh flow:
+ *  - revoked token presented again → entire family revoked → 401 invalid_refresh
+ *  - expired token                  → 401 invalid_refresh
+ *  - not found                      → 401 invalid_refresh
+ *
+ * On success returns the same body shape as login (new access + new refresh).
+ * The runtime (S3) overwrites both cookies with the rotated values.
+ *
+ * Any failure collapses to a constant 401 { error: 'invalid_refresh' } — the
+ * caller never learns WHY (no-session vs expired vs theft) over the wire.
+ */
+async function handleCustomerRefresh(request: Request, env: Env): Promise<Response> {
+  let body: CustomerRefreshRequest;
+  try {
+    body = await request.json() as CustomerRefreshRequest;
+  } catch {
+    return jsonResponse({ error: 'invalid_request' }, 400);
+  }
+
+  const refreshToken = (body.refreshToken || '').trim();
+  const tenantId = (body.tenantId || '').trim();
+  const tenantOrigin = (body.tenantOrigin || '').trim();
+
+  if (!refreshToken || !tenantId || !tenantOrigin) {
+    return jsonResponse({ error: 'invalid_request' }, 400);
+  }
+
+  const validOrigin = await validateTenantOrigin(env, tenantId, tenantOrigin);
+  if (!validOrigin) {
+    return jsonResponse({ error: 'invalid_tenant_origin' }, 400);
+  }
+
+  const db = new AuthDB(env.AUTH_DB);
+  await db.enableForeignKeys();
+
+  const tokenHash = await hashRefreshToken(refreshToken);
+  const existing = await db.getRefreshTokenByHash(tokenHash);
+
+  if (!existing) {
+    return jsonResponse({ error: 'invalid_refresh' }, 401);
+  }
+
+  // Theft detection: a revoked token presented again revokes the whole family.
+  if (existing.revoked_at !== null) {
+    await db.revokeRefreshTokenFamily(existing.family_id);
+    logAuthEvent(logger, {
+      event: 'customer_refresh_reuse_detected',
+      ip: auditIp(request),
+      route: '/api/internal/customer-refresh',
+      userAgent: request.headers.get('User-Agent'),
+      userId: existing.user_id,
+      statusCode: 401,
+      correlationId: correlationOf(request),
+      details: { tenantId, familyId: existing.family_id },
+    });
+    return jsonResponse({ error: 'invalid_refresh' }, 401);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (existing.expires_at <= now) {
+    return jsonResponse({ error: 'invalid_refresh' }, 401);
+  }
+
+  const user = await db.getUserById(existing.user_id);
+  if (!user) {
+    return jsonResponse({ error: 'invalid_refresh' }, 401);
+  }
+
+  // Rotate: revoke old, issue new in the same family. login_iat is carried
+  // forward by the DB primitive. reuseDetected can race here too.
+  const newRefreshToken = generateRefreshToken();
+  const newRefreshTokenHash = await hashRefreshToken(newRefreshToken);
+  const refreshTtlDays = parseInt(env.REFRESH_TOKEN_TTL_DAYS || '30', 10);
+  const newExpiresAt = now + refreshTtlDays * 24 * 60 * 60;
+
+  const rotation = await db.rotateRefreshToken(tokenHash, {
+    id: generateUUID(),
+    user_id: existing.user_id,
+    token_hash: newRefreshTokenHash,
+    family_id: existing.family_id,
+    expires_at: newExpiresAt,
+    ip: request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For'),
+    user_agent: request.headers.get('User-Agent'),
+  });
+
+  if (!rotation.success) {
+    return jsonResponse({ error: 'invalid_refresh' }, 401);
+  }
+
+  const ttlSeconds = parseInt(env.ACCESS_TOKEN_TTL_SECONDS || '900', 10);
+  const accessToken = await signCustomerAccessToken(
+    env,
+    { id: user.id, email: user.email, name: user.name },
+    ttlSeconds,
+  );
+
+  const success: CustomerAuthSuccess = {
+    accessToken,
+    refreshToken: newRefreshToken,
+    expiresIn: ttlSeconds,
+    user: { id: user.id, email: user.email, displayName: user.name || '' },
+  };
+
+  logAuthEvent(logger, {
+    event: 'customer_refresh_inline',
+    ip: auditIp(request),
+    route: '/api/internal/customer-refresh',
+    userAgent: request.headers.get('User-Agent'),
+    userId: user.id,
+    statusCode: 200,
+    correlationId: correlationOf(request),
+    details: { tenantId },
+  });
+
+  return jsonResponse(success, 200);
+}
+
+// ─── POST /api/internal/customer-logout ─────────────────────
+
+/**
+ * Revoke a customer refresh token server-side (single session). Idempotent —
+ * an unknown/missing token still returns { ok: true } so the runtime can always
+ * clear cookies and redirect home without leaking whether the token was live.
+ *
+ * Reuses db.revokeRefreshToken (the same single-session revoke path the
+ * auth-domain logout uses). No tenantOrigin check is required — possession of a
+ * valid internal secret + the plaintext refresh token is sufficient, and
+ * revoking a token is never harmful.
+ */
+async function handleCustomerLogout(request: Request, env: Env): Promise<Response> {
+  let body: CustomerLogoutRequest;
+  try {
+    body = await request.json() as CustomerLogoutRequest;
+  } catch {
+    return jsonResponse({ ok: true }, 200);
+  }
+
+  const refreshToken = (body.refreshToken || '').trim();
+  if (refreshToken) {
+    const db = new AuthDB(env.AUTH_DB);
+    await db.enableForeignKeys();
+    const tokenHash = await hashRefreshToken(refreshToken);
+    await db.revokeRefreshToken(tokenHash);
+  }
+
+  logAuthEvent(logger, {
+    event: 'customer_logout_inline',
+    ip: auditIp(request),
+    route: '/api/internal/customer-logout',
+    userAgent: request.headers.get('User-Agent'),
+    statusCode: 200,
+    correlationId: correlationOf(request),
+  });
+
+  return jsonResponse({ ok: true }, 200);
+}
+
 // ─── Unified Router ─────────────────────────────────────────
 
 /**
@@ -438,6 +637,12 @@ export async function handleInternalCustomerAuth(request: Request, env: Env): Pr
   }
   if (method === 'POST' && path === '/api/internal/customer-forgot-password') {
     return handleCustomerForgotPassword(request, env);
+  }
+  if (method === 'POST' && path === '/api/internal/customer-refresh') {
+    return handleCustomerRefresh(request, env);
+  }
+  if (method === 'POST' && path === '/api/internal/customer-logout') {
+    return handleCustomerLogout(request, env);
   }
 
   return jsonResponse({ error: 'Not found' }, 404);
