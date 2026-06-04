@@ -64,6 +64,45 @@ export async function getAdminMemberships(
 }
 
 /**
+ * True iff the user holds an ACTIVE `customer` membership on the given tenant.
+ *
+ * Context- and status-aware existence check used by the inline customer
+ * storefront flow to tenant-scope forgot-password (a user may legitimately
+ * have a global account but not be a customer of the requesting storefront).
+ * A user can hold multiple membership rows per tenant (e.g. customer + seller),
+ * so this is an EXISTS check, not a single-row `getMembership`.
+ */
+export async function hasCustomerMembership(
+  db: D1Database, userId: string, tenantId: string,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `SELECT 1 FROM tenant_memberships
+       WHERE user_id = ? AND tenant_id = ? AND context = 'customer' AND status = 'active'
+       LIMIT 1`
+    )
+    .bind(userId, tenantId)
+    .first<{ 1: number }>();
+  return result !== null;
+}
+
+/**
+ * True iff the user holds ANY active privileged membership
+ * (context IN seller / supplier / platform) on ANY tenant.
+ *
+ * Reuses getAdminMemberships, which already filters
+ * `context != 'customer' AND status = 'active'` — i.e. exactly the privileged
+ * set — rather than adding a parallel query. Used by the inline customer
+ * storefront flow to wall privileged accounts out of customer auth/reset.
+ */
+export async function hasPrivilegedMembership(
+  db: D1Database, userId: string,
+): Promise<boolean> {
+  const rows = await getAdminMemberships(db, userId);
+  return rows.length > 0;
+}
+
+/**
  * Create a tenant membership with a specific role.
  * Used by POST /api/internal/memberships for seller/supplier provisioning.
  *

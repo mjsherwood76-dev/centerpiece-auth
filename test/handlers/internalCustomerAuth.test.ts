@@ -17,6 +17,10 @@
  * - success body shape { accessToken, refreshToken, expiresIn, user }
  * - register email_exists conflict
  * - forgot-password constant { ok: true }
+ * - tenant-scope + privileged-exclusion (Fix — Customer Storefront Auth S1):
+ *   forgot only emails a genuine customer of THIS tenant with no privileged
+ *   context; login + register refuse any privileged account (incl. one who is
+ *   also a customer of this tenant — block-both) with the same constant shapes
  * - customer-refresh rotation: new tokens on valid refresh, theft detection on
  *   reuse (revoked token → family revoked → 401), expiry → 401 (Phase 3.20 S3)
  * - customer-logout: revokes the presented refresh token, idempotent ok:true
@@ -69,9 +73,18 @@ interface RefreshTokenRecord {
   login_iat: number;
 }
 
+interface MembershipRecord {
+  id: string;
+  user_id: string;
+  tenant_id: string;
+  context: string;
+  sub_role: string | null;
+  status: string;
+}
+
 interface Store {
   users: UserRecord[];
-  memberships: Array<{ id: string; user_id: string; tenant_id: string; context: string; sub_role: string | null }>;
+  memberships: MembershipRecord[];
   refreshTokens: RefreshTokenRecord[];
   resetTokens: Array<Record<string, unknown>>;
   tenants: Array<{ id: string; name: string; domain: string; status: string }>;
@@ -101,6 +114,17 @@ function buildAuthDb(store: Store): D1Database {
         }
         if (lower.startsWith('select * from refresh_tokens where token_hash')) {
           return (store.refreshTokens.find(t => t.token_hash === args[0]) ?? null) as T | null;
+        }
+        // hasCustomerMembership: SELECT 1 FROM tenant_memberships
+        //   WHERE user_id = ? AND tenant_id = ? AND context = 'customer' AND status = 'active' LIMIT 1
+        if (lower.startsWith('select 1 from tenant_memberships')) {
+          const userId = String(args[0]);
+          const tenantId = String(args[1]);
+          const hit = store.memberships.some(
+            m => m.user_id === userId && m.tenant_id === tenantId
+              && m.context === 'customer' && m.status === 'active',
+          );
+          return (hit ? ({ 1: 1 } as unknown as T) : null);
         }
         return null as T | null;
       },
@@ -141,7 +165,7 @@ function buildAuthDb(store: Store): D1Database {
           if (!exists) {
             store.memberships.push({
               id: String(args[0]), user_id: userId, tenant_id: tenantId,
-              context: 'customer', sub_role: null,
+              context: 'customer', sub_role: null, status: 'active',
             });
           }
         } else if (lower.startsWith('insert into refresh_tokens')) {
@@ -159,7 +183,18 @@ function buildAuthDb(store: Store): D1Database {
         }
         return { meta: { changes: 1 } } as unknown as D1Result;
       },
-      all: async <T>() => ({ results: [] as T[] } as unknown as D1Result<T>),
+      all: async <T>() => {
+        // getAdminMemberships (privileged check): SELECT tenant_id, context, sub_role
+        //   FROM tenant_memberships WHERE user_id = ? AND context != 'customer' AND status = 'active'
+        if (lower.startsWith('select tenant_id, context, sub_role from tenant_memberships')) {
+          const userId = String(args[0]);
+          const rows = store.memberships
+            .filter(m => m.user_id === userId && m.context !== 'customer' && m.status === 'active')
+            .map(m => ({ tenant_id: m.tenant_id, context: m.context, sub_role: m.sub_role }));
+          return { results: rows as unknown as T[] } as unknown as D1Result<T>;
+        }
+        return { results: [] as T[] } as unknown as D1Result<T>;
+      },
       raw: async () => [],
     } as unknown as D1PreparedStatement;
   }
@@ -250,6 +285,34 @@ async function seedRefreshToken(
     expires_at: opts.expiresAt ?? NOW() + 86400,
     revoked_at: opts.revoked ? 'now' : null,
     login_iat: NOW(),
+  });
+}
+
+/** Seed a user with a known password into the store. */
+async function seedUserWithPassword(
+  store: Store,
+  opts: { id: string; email: string; password: string; name?: string },
+): Promise<void> {
+  store.users.push({
+    id: opts.id, email: opts.email.toLowerCase(),
+    password_hash: await hashPassword(opts.password),
+    name: opts.name ?? 'Test', email_verified: 1, avatar_url: null,
+    created_at: '', updated_at: '',
+  });
+}
+
+/** Seed a membership row into the store. */
+function seedMembership(
+  store: Store,
+  opts: { userId: string; tenantId: string; context: string; subRole?: string | null; status?: string },
+): void {
+  store.memberships.push({
+    id: `m-${store.memberships.length}`,
+    user_id: opts.userId,
+    tenant_id: opts.tenantId,
+    context: opts.context,
+    sub_role: opts.subRole ?? null,
+    status: opts.status ?? 'active',
   });
 }
 
@@ -379,6 +442,64 @@ describe('POST /api/internal/customer-login', () => {
     assert.equal(store.memberships[0].sub_role, null);
     assert.equal(store.refreshTokens.length, 1, 'refresh token persisted');
   });
+
+  it('refuses a privileged account with constant invalid_credentials — no token, no membership', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    await seedUserWithPassword(store, { id: 'u1', email: 'seller@b.com', password: 'correct-horse', name: 'Seller' });
+    seedMembership(store, { userId: 'u1', tenantId: TENANT.id, context: 'seller', subRole: 'owner' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-login',
+        { email: 'seller@b.com', password: 'correct-horse', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 401);
+    const body = await res.json() as Record<string, string>;
+    assert.equal(body.error, 'invalid_credentials');
+    // No storefront token issued, no customer membership auto-created.
+    assert.equal(store.refreshTokens.length, 0, 'no refresh token for privileged login');
+    assert.ok(
+      !store.memberships.some(m => m.context === 'customer'),
+      'no customer membership auto-created for privileged login',
+    );
+  });
+
+  it('refuses a privileged user who is ALSO a customer of this tenant (block-both)', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    await seedUserWithPassword(store, { id: 'u1', email: 'mike@b.com', password: 'correct-horse', name: 'Mike' });
+    seedMembership(store, { userId: 'u1', tenantId: TENANT.id, context: 'customer' });
+    seedMembership(store, { userId: 'u1', tenantId: TENANT.id, context: 'platform', subRole: 'owner' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-login',
+        { email: 'mike@b.com', password: 'correct-horse', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 401);
+    const body = await res.json() as Record<string, string>;
+    assert.equal(body.error, 'invalid_credentials');
+    assert.equal(store.refreshTokens.length, 0, 'no token issued even though also a customer');
+  });
+
+  it('still logs in a customer-only user who has an existing customer membership', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    await seedUserWithPassword(store, { id: 'u1', email: 'jane@b.com', password: 'correct-horse', name: 'Jane' });
+    seedMembership(store, { userId: 'u1', tenantId: TENANT.id, context: 'customer' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-login',
+        { email: 'jane@b.com', password: 'correct-horse', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 200);
+    assert.equal(store.refreshTokens.length, 1, 'token issued for customer-only user');
+  });
 });
 
 // ─── Register ───────────────────────────────────────────────
@@ -431,6 +552,27 @@ describe('POST /api/internal/customer-register', () => {
     );
     assert.equal(res.status, 400);
   });
+
+  it('returns email_exists (409) for a privileged account and attaches no customer membership', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    await seedUserWithPassword(store, { id: 'u1', email: 'seller@b.com', password: 'x', name: 'Seller' });
+    seedMembership(store, { userId: 'u1', tenantId: TENANT.id, context: 'seller', subRole: 'owner' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-register',
+        { email: 'seller@b.com', password: 'longenough1', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 409);
+    const body = await res.json() as Record<string, string>;
+    assert.equal(body.error, 'email_exists');
+    assert.ok(
+      !store.memberships.some(m => m.context === 'customer'),
+      'no customer membership attached to a privileged account',
+    );
+  });
 });
 
 // ─── Forgot password ────────────────────────────────────────
@@ -463,6 +605,63 @@ describe('POST /api/internal/customer-forgot-password', () => {
     assert.equal(res.status, 200);
     const body = await res.json() as Record<string, boolean>;
     assert.equal(body.ok, true);
+  });
+
+  it('sends a reset for a genuine customer OF THIS TENANT', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    await seedUserWithPassword(store, { id: 'u1', email: 'cust@b.com', password: 'x' });
+    seedMembership(store, { userId: 'u1', tenantId: TENANT.id, context: 'customer' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-forgot-password',
+        { email: 'cust@b.com', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 200);
+    const body = await res.json() as Record<string, boolean>;
+    assert.equal(body.ok, true);
+    assert.equal(store.resetTokens.length, 1, 'reset token issued for real customer');
+  });
+
+  it('does NOT send a reset for a user who is not a customer of this tenant', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    await seedUserWithPassword(store, { id: 'u1', email: 'other@b.com', password: 'x' });
+    // Customer of a DIFFERENT tenant only.
+    seedMembership(store, { userId: 'u1', tenantId: 'some-other-tenant', context: 'customer' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-forgot-password',
+        { email: 'other@b.com', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 200);
+    const body = await res.json() as Record<string, boolean>;
+    assert.equal(body.ok, true);
+    assert.equal(store.resetTokens.length, 0, 'no reset token for non-customer-of-tenant');
+  });
+
+  it('does NOT send a reset for a privileged account (even if also a customer of this tenant)', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    await seedUserWithPassword(store, { id: 'u1', email: 'mike@b.com', password: 'x' });
+    // Holds a customer membership on this tenant AND a platform context.
+    seedMembership(store, { userId: 'u1', tenantId: TENANT.id, context: 'customer' });
+    seedMembership(store, { userId: 'u1', tenantId: TENANT.id, context: 'platform', subRole: 'owner' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-forgot-password',
+        { email: 'mike@b.com', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 200);
+    const body = await res.json() as Record<string, boolean>;
+    assert.equal(body.ok, true);
+    assert.equal(store.resetTokens.length, 0, 'no reset token for privileged account');
   });
 });
 

@@ -46,6 +46,13 @@
  * - Login failures return a constant `invalid_credentials` message regardless of
  *   whether the email or the password was wrong (account-enumeration prevention),
  *   with a dummy hash on the no-user path to keep timing consistent.
+ * - The customer storefront flow is tenant-scoped + privileged-safe (Fix —
+ *   Customer Storefront Auth Tenant-Scoping, S1): forgot-password only emails a
+ *   genuine customer OF THIS TENANT who holds no privileged context; login and
+ *   register refuse any account holding a seller/supplier/platform context
+ *   (block-both) with the same constant responses, never minting a storefront
+ *   token or membership for a privileged/global-shared identity. Refusals are
+ *   audited (`customer_*_refused_privileged`) without leaking to the caller.
  * - Passwords are hashed/verified via the repo's existing PBKDF2-SHA-256 module
  *   (`crypto/passwords.ts`) — NOT argon2id.
  */
@@ -295,6 +302,26 @@ async function handleCustomerLogin(request: Request, env: Env): Promise<Response
     return jsonResponse({ error: 'invalid_credentials' }, 401);
   }
 
+  // Privileged-exclusion (operator decision: block-both): a user holding ANY
+  // privileged context (seller/supplier/platform) may NOT use the customer
+  // storefront login — even if they are also a customer of this tenant. Return
+  // the SAME constant invalid_credentials (no leak), issue no token, and do NOT
+  // auto-create a customer membership. A storefront token must never be minted
+  // for a privileged/global-shared identity.
+  if (await db.hasPrivilegedMembership(user.id)) {
+    logAuthEvent(logger, {
+      event: 'customer_login_refused_privileged',
+      ip: auditIp(request),
+      route: '/api/internal/customer-login',
+      userAgent: request.headers.get('User-Agent'),
+      userId: user.id,
+      statusCode: 401,
+      correlationId: correlationOf(request),
+      details: { tenantId },
+    });
+    return jsonResponse({ error: 'invalid_credentials' }, 401);
+  }
+
   // Auto-create the customer membership (context 'customer' only — never
   // seller/supplier/platform). ensureMembership is idempotent and hard-codes
   // the customer context.
@@ -356,8 +383,23 @@ async function handleCustomerRegister(request: Request, env: Env): Promise<Respo
 
   // Registration inherently reveals whether an email exists (account-enumeration
   // is unavoidable for registration UX; mitigated by Phase 3.12 rate limiting).
+  // For a privileged account (seller/supplier/platform) we return the SAME
+  // 409 email_exists — no new leak — and never attach a customer membership to
+  // it (the short-circuit below guarantees no ensureMembership runs).
   const existing = await db.getUserByEmail(email);
   if (existing) {
+    if (await db.hasPrivilegedMembership(existing.id)) {
+      logAuthEvent(logger, {
+        event: 'customer_register_refused_privileged',
+        ip: auditIp(request),
+        route: '/api/internal/customer-register',
+        userAgent: request.headers.get('User-Agent'),
+        userId: existing.id,
+        statusCode: 409,
+        correlationId: correlationOf(request),
+        details: { tenantId },
+      });
+    }
     return jsonResponse({ error: 'email_exists' }, 409);
   }
 
@@ -425,25 +467,50 @@ async function handleCustomerForgotPassword(request: Request, env: Env): Promise
 
     const user = await db.getUserByEmail(email);
     if (user) {
-      const resetToken = generateAuthCode();
-      const resetTokenHash = await sha256Hex(resetToken);
-      const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1-hour TTL
+      // Tenant-scope + privileged-exclusion: only send a reset to a genuine
+      // customer OF THIS TENANT who holds NO privileged context. A privileged
+      // account (seller/supplier/platform) or a global user who isn't a customer
+      // of the requesting storefront must NOT receive a storefront reset — the
+      // password is global and a storefront must never reset a privileged one.
+      const isCustomer = await db.hasCustomerMembership(user.id, tenantId);
+      const isPrivileged = await db.hasPrivilegedMembership(user.id);
 
-      await db.insertPasswordResetToken({
-        token_hash: resetTokenHash,
-        user_id: user.id,
-        expires_at: expiresAt,
-      });
+      if (isCustomer && !isPrivileged) {
+        const resetToken = generateAuthCode();
+        const resetTokenHash = await sha256Hex(resetToken);
+        const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1-hour TTL
 
-      // Reset link lands on the TENANT origin (inline-login lives there), not
-      // the auth domain. The reset-completion page is delivered in a later
-      // phase; for S1 the link target is the validated tenant origin.
-      const resetUrl = `${validOrigin}/reset-password?token=${resetToken}`;
-      const branding = await loadTenantBranding(tenantId, env);
-      await sendPasswordResetEmail(env, user.email, resetUrl, branding, {
-        tenantId,
-        userId: user.id,
-      });
+        await db.insertPasswordResetToken({
+          token_hash: resetTokenHash,
+          user_id: user.id,
+          expires_at: expiresAt,
+        });
+
+        // Reset link lands on the TENANT origin (inline-login lives there), not
+        // the auth domain. The reset-completion page is delivered in a later
+        // phase; for S1 the link target is the validated tenant origin.
+        const resetUrl = `${validOrigin}/reset-password?token=${resetToken}`;
+        const branding = await loadTenantBranding(tenantId, env);
+        await sendPasswordResetEmail(env, user.email, resetUrl, branding, {
+          tenantId,
+          userId: user.id,
+        });
+      } else {
+        // Refused: not a customer of this tenant, or holds a privileged context.
+        // Keep the dummy-work path so timing does not betray the branch, and
+        // audit the refusal WITHOUT leaking anything to the caller.
+        await dummyHashDelay();
+        logAuthEvent(logger, {
+          event: 'customer_forgot_refused_privileged',
+          ip: auditIp(request),
+          route: '/api/internal/customer-forgot-password',
+          userAgent: request.headers.get('User-Agent'),
+          userId: user.id,
+          statusCode: 200,
+          correlationId: correlationOf(request),
+          details: { tenantId, isCustomer, isPrivileged },
+        });
+      }
     }
   }
 
