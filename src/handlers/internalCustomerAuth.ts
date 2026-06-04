@@ -13,6 +13,7 @@
  *   POST /api/internal/customer-forgot-password  — send branded reset email
  *   POST /api/internal/customer-refresh          — rotate refresh + issue new access (Phase 3.20 S3)
  *   POST /api/internal/customer-logout           — revoke refresh server-side (Phase 3.20 S3)
+ *   POST /api/internal/customer-reset-password   — complete a tenant-scoped reset (Fix S3)
  *
  * Contract (consumed by runtime S2/S3):
  *   Request bodies (JSON):
@@ -21,6 +22,7 @@
  *     forgot:   { email, tenantId, tenantOrigin }
  *     refresh:  { refreshToken, tenantId, tenantOrigin }
  *     logout:   { refreshToken }
+ *     reset:    { token, newPassword, tenantId, tenantOrigin }
  *   Success (login + register + refresh), 200:
  *     { accessToken, refreshToken, expiresIn, user: { id, email, displayName } }
  *   Failure:
@@ -29,6 +31,12 @@
  *     forgot   → 200 { ok: true }                       (unconditional)
  *     refresh  → 401 { error: 'invalid_refresh' }       (any rotation/theft/expiry failure)
  *     logout   → 200 { ok: true }                       (unconditional; idempotent)
+ *     reset    → 200 { ok: true }  on success           (constant success shape)
+ *              → 400 { error: 'invalid_request' }       (missing token/password/tenant fields)
+ *              → 400 { error: 'invalid_tenant_origin' } (origin ≠ tenant domain)
+ *              → 400 { error: 'reset_failed' }          (constant failure: bad/expired/used
+ *                                                         token, OR not a customer of THIS
+ *                                                         tenant, OR privileged at completion)
  *
  * Refresh rotation + theft detection reuse the EXISTING D1 rotation primitives
  * (db.rotateRefreshToken / db.revokeRefreshTokenFamily) — the same machinery
@@ -73,7 +81,7 @@ import {
 import { requireInternalSecret } from '../security/internalSecret.js';
 import { buildDeviceLabel, buildDeviceFingerprint } from '../security/deviceLabel.js';
 import { loadTenantBranding } from '../branding.js';
-import { sendPasswordResetEmail } from '../email/send.js';
+import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../email/send.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
 import { jsonResponse } from '../util/httpJson.js';
@@ -107,6 +115,13 @@ interface CustomerRefreshRequest {
 
 interface CustomerLogoutRequest {
   refreshToken?: string;
+}
+
+interface CustomerResetPasswordRequest {
+  token?: string;
+  newPassword?: string;
+  tenantId?: string;
+  tenantOrigin?: string;
 }
 
 /** Success body shared by login + register. S3 reads these to set cookies. */
@@ -683,6 +698,125 @@ async function handleCustomerLogout(request: Request, env: Env): Promise<Respons
   return jsonResponse({ ok: true }, 200);
 }
 
+// ─── POST /api/internal/customer-reset-password ─────────────
+
+/**
+ * Complete a customer password reset from the tenant-origin /reset-password
+ * page (runtime S4 proxies here via the AUTH Service Binding).
+ *
+ * Mirrors the auth-domain completion path (handlers/resetPassword.ts) for the
+ * token mechanics — hash lookup + one-shot consume + set password + revoke all
+ * sessions — but adds the load-bearing tenant-scope + privileged-exclusion
+ * guard that the auth-domain path intentionally omits.
+ *
+ * Why re-check membership HERE, not just at issue: `password_reset_tokens` has
+ * no `tenant_id` column (0001) — the token carries only `user_id`. The tenant
+ * binding is therefore the completing request's `tenantId`. The 1h token TTL
+ * can outlast a membership change, so a token issued to a then-pure-customer
+ * could be presented after that user gained a privileged context. Because the
+ * password is GLOBAL, a storefront reset must never set a privileged/shared
+ * password. We re-derive scope from membership AS OF NOW and refuse unless the
+ * user is currently a `customer` of the completing tenant AND holds no
+ * privileged context.
+ *
+ * Failure shapes are constant (`reset_failed`) regardless of WHY — bad/expired/
+ * used token, wrong tenant, or privileged — so the caller cannot enumerate.
+ * The token is consumed one-shot BEFORE the guard runs (via the existing
+ * consumePasswordResetToken path), so a refused attempt still burns the token.
+ */
+async function handleCustomerResetPassword(request: Request, env: Env): Promise<Response> {
+  let body: CustomerResetPasswordRequest;
+  try {
+    body = await request.json() as CustomerResetPasswordRequest;
+  } catch {
+    return jsonResponse({ error: 'invalid_request' }, 400);
+  }
+
+  const token = (body.token || '').trim();
+  const newPassword = body.newPassword || '';
+  const tenantId = (body.tenantId || '').trim();
+  const tenantOrigin = (body.tenantOrigin || '').trim();
+
+  if (!token || !tenantId || !tenantOrigin) {
+    return jsonResponse({ error: 'invalid_request' }, 400);
+  }
+  if (newPassword.length < 8) {
+    return jsonResponse({ error: 'invalid_request' }, 400);
+  }
+
+  const validOrigin = await validateTenantOrigin(env, tenantId, tenantOrigin);
+  if (!validOrigin) {
+    return jsonResponse({ error: 'invalid_tenant_origin' }, 400);
+  }
+
+  const db = new AuthDB(env.AUTH_DB);
+  await db.enableForeignKeys();
+
+  // One-shot consume: looks up the token by SHA-256 hash, requires used_at IS
+  // NULL, and marks it used. A second presentation of the same token returns
+  // null here (already consumed).
+  const tokenHash = await sha256Hex(token);
+  const resetRow = await db.consumePasswordResetToken(tokenHash);
+
+  if (!resetRow) {
+    return jsonResponse({ error: 'reset_failed' }, 400);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (resetRow.expires_at <= now) {
+    return jsonResponse({ error: 'reset_failed' }, 400);
+  }
+
+  // Re-evaluate tenant scope + privilege AT COMPLETION (see header). The token
+  // is already consumed above, so a refused attempt still burns it (one-shot).
+  const isCustomer = await db.hasCustomerMembership(resetRow.user_id, tenantId);
+  const isPrivileged = await db.hasPrivilegedMembership(resetRow.user_id);
+
+  if (!isCustomer || isPrivileged) {
+    logAuthEvent(logger, {
+      event: 'customer_reset_refused_privileged',
+      ip: auditIp(request),
+      route: '/api/internal/customer-reset-password',
+      userAgent: request.headers.get('User-Agent'),
+      userId: resetRow.user_id,
+      statusCode: 400,
+      correlationId: correlationOf(request),
+      details: { tenantId, isCustomer, isPrivileged },
+    });
+    return jsonResponse({ error: 'reset_failed' }, 400);
+  }
+
+  // Set the new password (PBKDF2 via crypto/passwords.ts) and revoke ALL refresh
+  // tokens for the user — same machinery as the auth-domain completion path.
+  const passwordHash = await hashPassword(newPassword);
+  await db.updateUserPassword(resetRow.user_id, passwordHash);
+  await db.revokeAllRefreshTokensForUser(resetRow.user_id);
+
+  // Notify (non-fatal). Branding is the completing tenant's.
+  const user = await db.getUserById(resetRow.user_id);
+  if (user) {
+    const branding = await loadTenantBranding(tenantId, env);
+    const forgotPasswordUrl = `${validOrigin}/forgot-password`;
+    await sendPasswordChangedEmail(env, user.email, branding, forgotPasswordUrl, {
+      tenantId,
+      userId: resetRow.user_id,
+    });
+  }
+
+  logAuthEvent(logger, {
+    event: 'customer_reset_completed',
+    ip: auditIp(request),
+    route: '/api/internal/customer-reset-password',
+    userAgent: request.headers.get('User-Agent'),
+    userId: resetRow.user_id,
+    statusCode: 200,
+    correlationId: correlationOf(request),
+    details: { tenantId },
+  });
+
+  return jsonResponse({ ok: true }, 200);
+}
+
 // ─── Unified Router ─────────────────────────────────────────
 
 /**
@@ -710,6 +844,9 @@ export async function handleInternalCustomerAuth(request: Request, env: Env): Pr
   }
   if (method === 'POST' && path === '/api/internal/customer-logout') {
     return handleCustomerLogout(request, env);
+  }
+  if (method === 'POST' && path === '/api/internal/customer-reset-password') {
+    return handleCustomerResetPassword(request, env);
   }
 
   return jsonResponse({ error: 'Not found' }, 404);
