@@ -356,7 +356,9 @@ export default {
       // called by centerpiece-site-runtime so tenant storefronts can serve
       // /login, /register, /forgot-password on their own origin. The handler
       // gates on X-CP-Internal-Secret and emits its own audit events.
-      if (method === 'POST' && path.startsWith('/api/internal/customer-')) {
+      if (method === 'POST'
+          && (path.startsWith('/api/internal/customer-')
+            || path === '/api/internal/revoke-customer-membership')) {
         response = await handleInternalCustomerAuth(request, env);
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }

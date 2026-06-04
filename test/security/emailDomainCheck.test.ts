@@ -5,7 +5,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { isPlatformEmailAllowed } from '../../src/security/emailDomainCheck.js';
+import { isPlatformEmailAllowed, isEmailAllowedForTenant } from '../../src/security/emailDomainCheck.js';
 import type { Env } from '../../src/types.js';
 
 /** Build a minimal Env stub with just the domains var set. */
@@ -66,5 +66,41 @@ describe('isPlatformEmailAllowed', () => {
     // "notcenterpiecelab.com" should not match "centerpiecelab.com"
     const env = makeEnv('centerpiecelab.com');
     assert.equal(isPlatformEmailAllowed('mike@notcenterpiecelab.com', env), false);
+  });
+});
+
+describe('isEmailAllowedForTenant (Phase 3.25 per-tenant allowlist)', () => {
+  const DOMAINS = ['valhallan.com', 'xpleague.com'];
+
+  it('accepts an email matching the first allowed domain', () => {
+    assert.equal(isEmailAllowedForTenant('someone@valhallan.com', DOMAINS), true);
+  });
+
+  it('accepts an email matching the second allowed domain', () => {
+    assert.equal(isEmailAllowedForTenant('someone@xpleague.com', DOMAINS), true);
+  });
+
+  it('rejects an email whose domain is not on the allowlist', () => {
+    assert.equal(isEmailAllowedForTenant('someone@gmail.com', DOMAINS), false);
+  });
+
+  it('fails closed on an empty allowlist', () => {
+    assert.equal(isEmailAllowedForTenant('someone@valhallan.com', []), false);
+  });
+
+  it('rejects a subdomain of an allowed domain (exact @domain suffix only)', () => {
+    assert.equal(isEmailAllowedForTenant('someone@sub.valhallan.com', DOMAINS), false);
+  });
+
+  it('rejects a prefix-collision domain', () => {
+    assert.equal(isEmailAllowedForTenant('someone@notvalhallan.com', DOMAINS), false);
+  });
+
+  it('is case-insensitive on both email and allowlist', () => {
+    assert.equal(isEmailAllowedForTenant('Someone@VALHALLAN.com', ['Valhallan.com']), true);
+  });
+
+  it('ignores blank/whitespace allowlist entries', () => {
+    assert.equal(isEmailAllowedForTenant('someone@valhallan.com', ['', '  ', 'valhallan.com']), true);
   });
 });

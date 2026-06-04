@@ -80,6 +80,8 @@ import {
 } from '../crypto/refreshTokens.js';
 import { requireInternalSecret } from '../security/internalSecret.js';
 import { maybeSendVerificationForGatedTenant } from './emailVerification.js';
+import { loadTenantGating } from '../security/tenantGating.js';
+import { isEmailAllowedForTenant } from '../security/emailDomainCheck.js';
 import { buildDeviceLabel, buildDeviceFingerprint } from '../security/deviceLabel.js';
 import { loadTenantBranding } from '../branding.js';
 import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../email/send.js';
@@ -279,6 +281,43 @@ function correlationOf(request: Request): string {
     || 'unknown';
 }
 
+/** Bare email domain for audit logging (local part is PII and never logged). */
+function redactEmailDomain(email: string): string {
+  const at = email.lastIndexOf('@');
+  return at >= 0 ? email.slice(at + 1).toLowerCase() : 'unknown';
+}
+
+/**
+ * Phase 3.25 domain-allowlist gate. Returns true when `email` is REJECTED — the
+ * tenant is gated with a `domain-allowlist` policy and the email's domain is not
+ * on the allowlist. Returns false for public/authenticated-only tenants (the
+ * gate does not apply) or when the domain is allowed. Audits every rejection
+ * (`customer_domain_restricted`) with a redacted domain — no PII, no allowlist
+ * echoed to the caller.
+ */
+async function isDomainRestricted(
+  request: Request,
+  env: Env,
+  tenantId: string,
+  email: string,
+  route: string,
+): Promise<boolean> {
+  const gating = await loadTenantGating(env, tenantId || null);
+  if (!gating.gated || gating.policy !== 'domain-allowlist') return false;
+  if (isEmailAllowedForTenant(email, gating.allowedEmailDomains)) return false;
+
+  logAuthEvent(logger, {
+    event: 'customer_domain_restricted',
+    ip: auditIp(request),
+    route,
+    userAgent: request.headers.get('User-Agent'),
+    statusCode: route.endsWith('customer-login') ? 401 : 400,
+    correlationId: correlationOf(request),
+    details: { tenantId, emailDomain: redactEmailDomain(email) },
+  });
+  return true;
+}
+
 // ─── POST /api/internal/customer-login ──────────────────────
 
 async function handleCustomerLogin(request: Request, env: Env): Promise<Response> {
@@ -301,6 +340,14 @@ async function handleCustomerLogin(request: Request, env: Env): Promise<Response
   const validOrigin = await validateTenantOrigin(env, tenantId, tenantOrigin);
   if (!validOrigin) {
     return jsonResponse({ error: 'invalid_tenant_origin' }, 400);
+  }
+
+  // Gated-tenant domain allowlist (Phase 3.25). A non-allowed domain on a gated
+  // tenant cannot log in. Return the SAME constant invalid_credentials (no leak
+  // of gating posture or allowlist) and keep the dummy-work timing path.
+  if (email && await isDomainRestricted(request, env, tenantId, email, '/api/internal/customer-login')) {
+    await dummyHashDelay();
+    return jsonResponse({ error: 'invalid_credentials' }, 401);
   }
 
   const db = new AuthDB(env.AUTH_DB);
@@ -394,6 +441,12 @@ async function handleCustomerRegister(request: Request, env: Env): Promise<Respo
   const validOrigin = await validateTenantOrigin(env, tenantId, tenantOrigin);
   if (!validOrigin) {
     return jsonResponse({ error: 'invalid_tenant_origin' }, 400);
+  }
+
+  // Gated-tenant domain allowlist (Phase 3.25). On a gated tenant only allowed
+  // domains may register; the rejection does NOT echo the allowlist.
+  if (await isDomainRestricted(request, env, tenantId, email, '/api/internal/customer-register')) {
+    return jsonResponse({ error: 'domain_not_allowed' }, 400);
   }
 
   const db = new AuthDB(env.AUTH_DB);
@@ -827,10 +880,67 @@ async function handleCustomerResetPassword(request: Request, env: Env): Promise<
   return jsonResponse({ ok: true }, 200);
 }
 
+// ─── POST /api/internal/revoke-customer-membership ──────────
+
+interface RevokeCustomerMembershipRequest {
+  userId?: string;
+  tenantId?: string;
+}
+
+/**
+ * Offboard a customer from a tenant (Phase 3.25). Sets the customer membership
+ * row(s) for `(userId, tenantId, context='customer')` to status `suspended`.
+ *
+ * Why `suspended`, NOT `revoked`: `tenant_memberships.status` carries a
+ * `CHECK(status IN ('active','suspended','invited'))` constraint and SQLite
+ * cannot ALTER a CHECK without a full table rebuild — writing `'revoked'` would
+ * throw at runtime. ADR 014's guards already treat any non-`active` status as
+ * denied, so `'suspended'` is functionally "revoked access": a suspended member
+ * is denied on their next gated request. Reuses the existing `suspendMemberships`
+ * helper (db.memberships) which the membership-admin path already uses.
+ *
+ * Called by platform-api (Session 5) for operator-driven offboarding. Idempotent:
+ * re-suspending an already-suspended (or absent) membership affects 0 rows and
+ * still returns ok:true.
+ */
+async function handleRevokeCustomerMembership(request: Request, env: Env): Promise<Response> {
+  let body: RevokeCustomerMembershipRequest;
+  try {
+    body = await request.json() as RevokeCustomerMembershipRequest;
+  } catch {
+    return jsonResponse({ error: 'invalid_request' }, 400);
+  }
+
+  const userId = (body.userId || '').trim();
+  const tenantId = (body.tenantId || '').trim();
+  if (!userId || !tenantId) {
+    return jsonResponse({ error: 'invalid_request' }, 400);
+  }
+
+  const db = new AuthDB(env.AUTH_DB);
+  await db.enableForeignKeys();
+
+  const count = await db.suspendMemberships(userId, tenantId, 'customer');
+
+  logAuthEvent(logger, {
+    event: 'customer_membership_revoked',
+    ip: auditIp(request),
+    route: '/api/internal/revoke-customer-membership',
+    userAgent: request.headers.get('User-Agent'),
+    userId,
+    statusCode: 200,
+    correlationId: correlationOf(request),
+    details: { tenantId, count },
+  });
+
+  return jsonResponse({ revoked: true, count }, 200);
+}
+
 // ─── Unified Router ─────────────────────────────────────────
 
 /**
- * Route handler for /api/internal/customer-* endpoints.
+ * Route handler for the internal customer-auth endpoints (/api/internal/customer-*
+ * plus the revoke-customer-membership offboarding endpoint).
  * Validates the internal secret, then dispatches by method + path.
  */
 export async function handleInternalCustomerAuth(request: Request, env: Env): Promise<Response> {
@@ -857,6 +967,9 @@ export async function handleInternalCustomerAuth(request: Request, env: Env): Pr
   }
   if (method === 'POST' && path === '/api/internal/customer-reset-password') {
     return handleCustomerResetPassword(request, env);
+  }
+  if (method === 'POST' && path === '/api/internal/revoke-customer-membership') {
+    return handleRevokeCustomerMembership(request, env);
   }
 
   return jsonResponse({ error: 'Not found' }, 404);

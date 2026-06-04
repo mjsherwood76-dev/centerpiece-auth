@@ -37,6 +37,12 @@ import { sendWelcomeEmail } from '../email/send.js';
 import { maybeSendVerificationForGatedTenant } from './emailVerification.js';
 import { parseRequestBody } from '../util/parseRequestBody.js';
 import { buildDeviceLabel, buildDeviceFingerprint } from '../security/deviceLabel.js';
+import { loadTenantGating } from '../security/tenantGating.js';
+import { isEmailAllowedForTenant } from '../security/emailDomainCheck.js';
+import { ConsoleJsonLogger } from '../core/logger.js';
+import { logAuthEvent } from '../security/auditLog.js';
+
+const logger = new ConsoleJsonLogger();
 
 /**
  * Handle POST /api/register
@@ -115,6 +121,25 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   const existingUser = await db.getUserByEmail(email);
   if (existingUser) {
     return errorRedirect(env, tenantParam, redirectUrl, 'email_exists');
+  }
+
+  // ── Gated-tenant domain allowlist (Phase 3.25) ──
+  // On a gated tenant, only emails whose domain is on the tenant's allowlist may
+  // register. Public (ungated) tenants are unaffected (loadTenantGating returns
+  // ungated). The rejection message does NOT echo the allowed domains.
+  const gating = await loadTenantGating(env, tenantId || null);
+  if (gating.gated && gating.policy === 'domain-allowlist'
+      && !isEmailAllowedForTenant(email, gating.allowedEmailDomains)) {
+    logAuthEvent(logger, {
+      event: 'customer_domain_restricted',
+      ip: request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown',
+      route: '/api/register',
+      userAgent: request.headers.get('User-Agent'),
+      statusCode: 302,
+      correlationId: request.headers.get('x-correlation-id') || 'unknown',
+      details: { tenantId, emailDomain: redactEmailDomain(email) },
+    });
+    return errorRedirect(env, tenantParam, redirectUrl, 'domain_not_allowed');
   }
 
   // ── Create user ──
@@ -223,6 +248,16 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
 }
 
 // ─── Helpers ────────────────────────────────────────────────
+
+/**
+ * Extract the bare domain from an email for audit logging. The local part is PII
+ * and is never logged; the domain alone identifies WHICH allowlist rejected the
+ * attempt without exposing the person.
+ */
+function redactEmailDomain(email: string): string {
+  const at = email.lastIndexOf('@');
+  return at >= 0 ? email.slice(at + 1).toLowerCase() : 'unknown';
+}
 
 /**
  * Basic email validation.

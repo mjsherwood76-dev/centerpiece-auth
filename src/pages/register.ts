@@ -181,6 +181,10 @@ function getErrorMessage(code: string): string {
       return 'Password must be at least 8 characters.';
     case 'invalid_email':
       return 'Please enter a valid email address.';
+    case 'domain_not_allowed':
+      // Phase 3.25: gated tenant rejected this email's domain. Do NOT echo the
+      // allowed domains (that would leak the allowlist).
+      return 'This site is restricted and your email is not eligible to register.';
     case 'invalid_redirect':
       return 'The return URL is not valid. Please try again from the store.';
     case 'oauth_failed':

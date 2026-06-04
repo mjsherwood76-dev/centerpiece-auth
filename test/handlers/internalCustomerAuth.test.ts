@@ -129,6 +129,22 @@ function buildAuthDb(store: Store): D1Database {
         return null as T | null;
       },
       run: async () => {
+        if (lower.startsWith('update tenant_memberships set status')) {
+          // suspendMemberships: SET status='suspended' WHERE user_id=? AND
+          //   tenant_id=? AND context=? AND sub_role != 'owner' AND status='active'
+          const userId = String(args[0]);
+          const tenantId = String(args[1]);
+          const context = String(args[2]);
+          let changes = 0;
+          for (const m of store.memberships) {
+            if (m.user_id === userId && m.tenant_id === tenantId && m.context === context
+                && m.sub_role !== 'owner' && m.status === 'active') {
+              m.status = 'suspended';
+              changes++;
+            }
+          }
+          return { meta: { changes } } as unknown as D1Result;
+        }
         if (lower.startsWith('update refresh_tokens set revoked_at')) {
           // Two shapes: WHERE token_hash = ? [AND revoked_at IS NULL]  (single revoke / rotate-revoke)
           //             WHERE family_id = ? AND revoked_at IS NULL      (family revoke)
@@ -241,12 +257,29 @@ function buildKv(): KVNamespace {
   } as unknown as KVNamespace;
 }
 
-function mockEnv(store: Store): Env {
+/**
+ * TENANT_CONFIGS KV stub that returns a gating config for `tenant:<id>` lookups.
+ * Mirrors the D1→KV wrapper shape (`{ config: { ... } }`) loadTenantGating reads.
+ */
+function buildGatingKv(configsByTenant: Record<string, unknown>): KVNamespace {
+  return {
+    get: async (key: string) => {
+      const id = key.replace(/^tenant:/, '');
+      return (configsByTenant[id] ?? null) as never;
+    },
+    put: async () => {},
+    delete: async () => {},
+    list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    getWithMetadata: async () => ({ value: null, metadata: null }),
+  } as unknown as KVNamespace;
+}
+
+function mockEnv(store: Store, tenantConfigs?: KVNamespace): Env {
   return {
     AUTH_DB: buildAuthDb(store),
     TENANTS_DB: buildTenantsDb(store),
     CANONICAL_INPUTS: buildKv(),
-    TENANT_CONFIGS: buildKv(),
+    TENANT_CONFIGS: tenantConfigs ?? buildKv(),
     ENVIRONMENT: 'staging',
     AUTH_DOMAIN: 'https://auth.centerpiecelab.dev',
     ACCESS_TOKEN_TTL_SECONDS: '900',
@@ -814,5 +847,164 @@ describe('POST /api/internal/customer-logout', () => {
       mockEnv(store),
     );
     assert.equal(res.status, 403);
+  });
+});
+
+// ─── Gated-tenant domain allowlist (Phase 3.25) ─────────────
+
+/** TENANT_CONFIGS stub gating TENANT.id with a domain-allowlist policy. */
+function gatedConfigs(domains: string[]): KVNamespace {
+  return buildGatingKv({
+    [TENANT.id]: {
+      config: {
+        defaultAccessRequirement: { policy: 'domain-allowlist' },
+        allowedEmailDomains: domains,
+      },
+    },
+  });
+}
+
+describe('domain-allowlist enforcement — login', () => {
+  it('refuses a non-allowed domain with constant invalid_credentials (no token)', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    await seedUserWithPassword(store, { id: 'u1', email: 'outsider@gmail.com', password: 'correct-horse' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-login',
+        { email: 'outsider@gmail.com', password: 'correct-horse', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store, gatedConfigs(['valhallan.com'])),
+    );
+    assert.equal(res.status, 401);
+    const body = await res.json() as Record<string, string>;
+    assert.equal(body.error, 'invalid_credentials');
+    assert.equal(store.refreshTokens.length, 0, 'no token issued for non-allowed domain');
+  });
+
+  it('allows an on-allowlist domain to log in', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+    await seedUserWithPassword(store, { id: 'u1', email: 'member@valhallan.com', password: 'correct-horse' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-login',
+        { email: 'member@valhallan.com', password: 'correct-horse', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store, gatedConfigs(['valhallan.com', 'xpleague.com'])),
+    );
+    assert.equal(res.status, 200);
+    assert.equal(store.refreshTokens.length, 1, 'token issued for allowed domain');
+  });
+});
+
+describe('domain-allowlist enforcement — register', () => {
+  it('refuses a non-allowed domain (domain_not_allowed, no user created)', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-register',
+        { email: 'outsider@gmail.com', password: 'longenough1', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store, gatedConfigs(['valhallan.com'])),
+    );
+    assert.equal(res.status, 400);
+    const body = await res.json() as Record<string, string>;
+    assert.equal(body.error, 'domain_not_allowed');
+    assert.equal(store.users.length, 0, 'no user created for non-allowed domain');
+  });
+
+  it('allows an on-allowlist domain to register', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-register',
+        { email: 'newmember@xpleague.com', password: 'longenough1', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store, gatedConfigs(['valhallan.com', 'xpleague.com'])),
+    );
+    assert.equal(res.status, 200);
+    assert.equal(store.users.length, 1, 'user created for allowed domain');
+    assert.equal(store.memberships[0].context, 'customer');
+  });
+
+  it('does NOT gate a public (ungated) tenant — any domain registers', async () => {
+    const store = newStore();
+    store.tenants.push(TENANT);
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/customer-register',
+        { email: 'anyone@gmail.com', password: 'longenough1', tenantId: TENANT.id, tenantOrigin: ORIGIN },
+        INTERNAL_SECRET),
+      mockEnv(store), // default KV → ungated
+    );
+    assert.equal(res.status, 200);
+    assert.equal(store.users.length, 1, 'ungated tenant accepts any domain');
+  });
+});
+
+// ─── Revoke customer membership (Phase 3.25) ────────────────
+
+describe('POST /api/internal/revoke-customer-membership', () => {
+  it('requires the internal secret', async () => {
+    const store = newStore();
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/revoke-customer-membership', { userId: 'u1', tenantId: TENANT.id }),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 403);
+  });
+
+  it('rejects a missing userId/tenantId', async () => {
+    const store = newStore();
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/revoke-customer-membership', { userId: 'u1' }, INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 400);
+  });
+
+  it('suspends an active customer membership (constraint-safe status)', async () => {
+    const store = newStore();
+    seedMembership(store, { userId: 'u1', tenantId: TENANT.id, context: 'customer' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/revoke-customer-membership', { userId: 'u1', tenantId: TENANT.id }, INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 200);
+    const body = await res.json() as { revoked: boolean; count: number };
+    assert.equal(body.revoked, true);
+    assert.equal(body.count, 1);
+    assert.equal(store.memberships[0].status, 'suspended', 'membership set to suspended, not revoked');
+  });
+
+  it('only touches the customer context, leaving privileged memberships alone', async () => {
+    const store = newStore();
+    seedMembership(store, { userId: 'u1', tenantId: TENANT.id, context: 'customer' });
+    seedMembership(store, { userId: 'u1', tenantId: TENANT.id, context: 'seller', subRole: 'owner' });
+
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/revoke-customer-membership', { userId: 'u1', tenantId: TENANT.id }, INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 200);
+    const customer = store.memberships.find(m => m.context === 'customer')!;
+    const seller = store.memberships.find(m => m.context === 'seller')!;
+    assert.equal(customer.status, 'suspended');
+    assert.equal(seller.status, 'active', 'seller membership untouched');
+  });
+
+  it('is idempotent when no active membership exists (count 0, ok:true)', async () => {
+    const store = newStore();
+    const res = await handleInternalCustomerAuth(
+      makeRequest('/api/internal/revoke-customer-membership', { userId: 'ghost', tenantId: TENANT.id }, INTERNAL_SECRET),
+      mockEnv(store),
+    );
+    assert.equal(res.status, 200);
+    const body = await res.json() as { revoked: boolean; count: number };
+    assert.equal(body.count, 0);
   });
 });
