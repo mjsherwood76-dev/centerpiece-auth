@@ -124,6 +124,10 @@ export class AuthDB {
     return memberships.hasCustomerMembership(this.db, userId, tenantId);
   }
 
+  async hasAnyCustomerMembership(userId: string): Promise<boolean> {
+    return memberships.hasAnyCustomerMembership(this.db, userId);
+  }
+
   async hasPrivilegedMembership(userId: string): Promise<boolean> {
     return memberships.hasPrivilegedMembership(this.db, userId);
   }

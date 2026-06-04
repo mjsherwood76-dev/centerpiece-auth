@@ -16,6 +16,16 @@
  * - Token stored as SHA-256 hash (never plaintext)
  * - Single-use (marked as used on consumption)
  * - All sessions invalidated after password change
+ *
+ * INTENTIONALLY UNGUARDED (Fix — Customer Storefront Auth, S2): unlike the
+ * auth-domain *request* path (handlers/forgotPassword.ts), this *completion*
+ * path has NO pure-customer narrow-deny guard, by design. It is the privileged
+ * completion path — a pure-customer never reaches it because forgotPassword.ts
+ * refuses to issue them a token here (they reset via the storefront /reset-
+ * password page instead), so any token presented here belongs to a
+ * privileged/onboarding/mixed account that legitimately uses the auth domain.
+ * The storefront completion path is the separately-guarded internal endpoint
+ * (S3). Do not add a guard here under the impression it was missed.
  */
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';

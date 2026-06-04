@@ -23,6 +23,10 @@ import { generateAuthCode } from '../crypto/refreshTokens.js';
 import { loadTenantBranding } from '../branding.js';
 import { sendPasswordResetEmail } from '../email/send.js';
 import { parseRequestBody } from '../util/parseRequestBody.js';
+import { ConsoleJsonLogger } from '../core/logger.js';
+import { logAuthEvent } from '../security/auditLog.js';
+
+const logger = new ConsoleJsonLogger();
 
 /**
  * Handle POST /api/forgot-password
@@ -58,6 +62,39 @@ export async function handleForgotPassword(request: Request, env: Env): Promise<
   const user = await db.getUserByEmail(email);
 
   if (user) {
+    // ── Narrow-deny guard (Fix — Customer Storefront Auth, S2) ──
+    // The /forgot-password page is PUBLIC and reachable by anyone: privileged
+    // users (legit self-reset), brand-new sellers mid-onboarding (user row
+    // exists, membership not yet provisioned), orphaned/no-membership users, and
+    // legacy pure-customers. We DENY a reset here ONLY for a CONFIRMED
+    // PURE-CUSTOMER — an account that holds an active `customer` membership on
+    // some tenant AND holds NO privileged context. Such a user should reset via
+    // their storefront (the runtime /reset-password page), not the auth domain.
+    // Everyone else — privileged, no-membership/onboarding, and mixed-context
+    // users — still gets the reset. A broad "only privileged may reset" rule
+    // would lock out onboarding sellers and orphaned users; this is the exact
+    // bug this guard must NOT introduce, hence the narrow deny.
+    const isCustomerSomewhere = await db.hasAnyCustomerMembership(user.id);
+    const isPrivileged = await db.hasPrivilegedMembership(user.id);
+
+    if (isCustomerSomewhere && !isPrivileged) {
+      // Confirmed pure-customer: refuse on the auth domain. Keep a constant-time
+      // dummy-work path so the deny branch does not run conspicuously faster than
+      // the allow branch (which does token gen + hash + DB insert + email send),
+      // and audit the refusal WITHOUT leaking anything to the caller.
+      await dummyHashDelay();
+      logAuthEvent(logger, {
+        event: 'auth_reset_refused_pure_customer',
+        ip: auditIp(request),
+        route: '/api/forgot-password',
+        userAgent: request.headers.get('User-Agent'),
+        userId: user.id,
+        statusCode: 302,
+        correlationId: correlationOf(request),
+      });
+      return successRedirect(env, tenantParam, redirectUrl);
+    }
+
     // Generate reset token
     const resetToken = generateAuthCode(); // 256-bit random hex
     const resetTokenHash = await sha256Hex(resetToken);
@@ -109,4 +146,37 @@ function successRedirect(env: Env, tenant: string, redirect: string): Response {
       'Cache-Control': 'no-store',
     },
   });
+}
+
+/**
+ * Dummy PBKDF2 work to keep timing consistent across the deny branch (mirrors
+ * handlers/login.ts / internalCustomerAuth.ts). The allow branch does token gen
+ * + hash + DB insert + branded email send; the pure-customer deny branch must
+ * not betray itself by returning conspicuously faster.
+ */
+async function dummyHashDelay(): Promise<void> {
+  const dummyKey = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode('dummy-password'),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+  await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: new Uint8Array(32), iterations: 100_000, hash: 'SHA-256' },
+    dummyKey,
+    256,
+  );
+}
+
+function auditIp(request: Request): string {
+  return request.headers.get('CF-Connecting-IP')
+    || request.headers.get('X-Forwarded-For')
+    || 'internal';
+}
+
+function correlationOf(request: Request): string {
+  return request.headers.get('x-correlation-id')
+    || request.headers.get('x-request-id')
+    || 'unknown';
 }

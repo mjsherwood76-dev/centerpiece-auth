@@ -87,6 +87,30 @@ export async function hasCustomerMembership(
 }
 
 /**
+ * True iff the user holds an ACTIVE `customer` membership on ANY tenant.
+ *
+ * The tenant-agnostic counterpart to hasCustomerMembership(userId, tenantId).
+ * Used by the auth-domain forgot-password guard, which has no single requesting
+ * tenant in scope (the /forgot-password page is public, not storefront-bound) —
+ * it only needs to know whether this account is a customer somewhere, to decide
+ * whether it is a confirmed PURE-customer (customer-anywhere AND no privileged
+ * context) who should reset via their storefront instead.
+ */
+export async function hasAnyCustomerMembership(
+  db: D1Database, userId: string,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `SELECT 1 FROM tenant_memberships
+       WHERE user_id = ? AND context = 'customer' AND status = 'active'
+       LIMIT 1`
+    )
+    .bind(userId)
+    .first<{ 1: number }>();
+  return result !== null;
+}
+
+/**
  * True iff the user holds ANY active privileged membership
  * (context IN seller / supplier / platform) on ANY tenant.
  *
