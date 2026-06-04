@@ -61,6 +61,7 @@ export interface TenantBranding {
   tenantId: string;
   storeName: string;
   logoUrl: string | null;
+  domain: string | null; // Tenant's authoritative hostname (from its config) — for returning users to the tenant
   cssVariables: string; // Inline <style> block content
   googleFontsLinks: string; // <link> tags for Google Fonts
 }
@@ -101,6 +102,7 @@ export async function loadTenantBranding(
   let styleThemeId = DEFAULT_STYLE_ID;
   let storeName = 'Centerpiece';
   let logoUrl: string | null = null;
+  let domain: string | null = null;
 
   if (effectiveTenantId) {
     try {
@@ -128,6 +130,8 @@ export async function loadTenantBranding(
         }
         // Also check top-level name
         if (typeof tenantConfig.name === 'string') storeName = tenantConfig.name;
+        // Tenant's authoritative hostname — used to return verified users to the tenant (not the auth domain).
+        if (typeof tenantConfig.domain === 'string') domain = tenantConfig.domain;
       }
     } catch (err) {
       console.error(`Failed to load tenant config for "${effectiveTenantId}":`, err);
@@ -149,6 +153,7 @@ export async function loadTenantBranding(
     tenantId: effectiveTenantId || '__default__',
     storeName,
     logoUrl,
+    domain,
     cssVariables,
     googleFontsLinks,
   };

@@ -20,7 +20,13 @@ export function renderVerifyEmailPage(
   state: 'success' | 'failure',
   tenant: string | null,
 ): { html: string; status: number } {
-  const loginHref = `${env.AUTH_DOMAIN}/login?tenant=${encodeURIComponent(tenant || '')}`;
+  // Return the verified user to the TENANT's own login (the inline storefront login),
+  // not the bare auth domain. `branding.domain` is the tenant's authoritative hostname
+  // (resolved from its config, never a raw request param) — safe to link to. Falls back
+  // to the auth-domain /login only when the tenant/domain can't be resolved.
+  const loginHref = branding.domain
+    ? `https://${branding.domain}/login`
+    : `${env.AUTH_DOMAIN}/login?tenant=${encodeURIComponent(tenant || '')}`;
 
   const body = state === 'success'
     ? `

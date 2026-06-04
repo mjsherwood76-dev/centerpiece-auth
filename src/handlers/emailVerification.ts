@@ -48,7 +48,9 @@ export async function maybeSendVerificationForGatedTenant(
     created_at: now,
   });
 
-  const verificationUrl = `${env.AUTH_DOMAIN}/verify-email?token=${token}`;
+  // Include the tenant so the completion page brands correctly AND can return the
+  // user to the tenant's own login (not the bare auth domain).
+  const verificationUrl = `${env.AUTH_DOMAIN}/verify-email?token=${token}&tenant=${encodeURIComponent(tenantId)}`;
   const branding = await loadTenantBranding(tenantId, env);
   await sendEmailVerificationEmail(env, user.email, verificationUrl, branding, {
     tenantId,
