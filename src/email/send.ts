@@ -252,7 +252,9 @@ export async function sendEmailVerificationEmail(
     recipient: { email: to },
     variables: {
       customerName: to.split('@')[0] || 'there',
-      verificationUrl,
+      // Template (`email-verification`) requires the key `verifyUrl` (not `verificationUrl`);
+      // mismatch made the renderer throw "missing required variable" → silent no-op (no email sent).
+      verifyUrl: verificationUrl,
       expiresIn: '60 minutes',
     },
     idempotencyKey: context?.userId ? `auth:${context.userId}:email-verification:${verificationUrl}` : undefined,
