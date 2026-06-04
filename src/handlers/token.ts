@@ -308,6 +308,7 @@ export async function handleTokenExchange(request: Request, env: Env): Promise<R
         email: user.email,
         name: user.name || '',
         iss: env.AUTH_DOMAIN,
+        emailVerified: user.email_verified === 1,
       });
 
   const accessToken = await signJwt(

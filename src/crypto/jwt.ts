@@ -32,6 +32,11 @@ export interface JwtClaims {
   iss: string; // AUTH_DOMAIN
   iat: number; // issued at (Unix seconds)
   exp: number; // expiration (Unix seconds)
+  // Whether the user's email has been verified (Phase 3.25 — tenant access
+  // gating). Carried on customer (storefront) tokens so the runtime's
+  // domain-allowlist gate can require a verified email without a DB round-trip.
+  // The runtime mirrors this field structurally (it does NOT import this type).
+  email_verified?: boolean;
   // Admin token fields (present on admin tokens only)
   jti?: string;                    // unique token ID (UUID) — enables targeted revocation
   contexts?: Record<string, string[]>; // e.g., { seller: ['owner'] } — scoped to primaryTenantId tenant
@@ -89,15 +94,26 @@ interface JwtIdentityInput {
  *
  * Customer tokens carry no admin contexts, no jti, no primaryTenantId. The
  * tenant is conveyed via the `iss` host in normal customer flows.
+ *
+ * `emailVerified` (Phase 3.25) sets the `email_verified` claim consumed by the
+ * runtime's domain-allowlist access gate. Issuers load it from the persisted
+ * `users.email_verified` column. When omitted the claim is left absent (treated
+ * as not-verified by the gate, which fails closed).
  */
-export function buildCustomerJwtPayload(input: JwtIdentityInput): UnsignedJwtClaims {
-  return {
+export function buildCustomerJwtPayload(
+  input: JwtIdentityInput & { emailVerified?: boolean },
+): UnsignedJwtClaims {
+  const payload: UnsignedJwtClaims = {
     sub: input.userId,
     email: input.email,
     name: input.name,
     aud: 'storefront',
     iss: input.iss,
   };
+  if (input.emailVerified !== undefined) {
+    payload.email_verified = input.emailVerified;
+  }
+  return payload;
 }
 
 /**
@@ -233,6 +249,7 @@ export async function signJwt(
     iat: now,
     exp: now + ttlSeconds,
   };
+  if (payload.email_verified !== undefined) fullPayload.email_verified = payload.email_verified;
   if (payload.jti !== undefined) fullPayload.jti = payload.jti;
   if (payload.contexts !== undefined) fullPayload.contexts = payload.contexts;
   if (payload.primaryTenantId !== undefined) fullPayload.primaryTenantId = payload.primaryTenantId;

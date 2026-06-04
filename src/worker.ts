@@ -33,6 +33,7 @@ import { handleMicrosoftOAuthInit, handleMicrosoftOAuthCallback } from './oauth/
 import { handleForgotPassword } from './handlers/forgotPassword.js';
 import { handleResetPassword } from './handlers/resetPassword.js';
 import { handleResetPasswordPage } from './pages/resetPassword.js';
+import { handleVerifyEmail } from './handlers/verifyEmail.js';
 import { handleMemberships } from './handlers/memberships.js';
 import { handleSwitchTenant } from './handlers/switchTenant.js';
 import { handleStepUp } from './handlers/stepUp.js';
@@ -182,6 +183,19 @@ export default {
 
       if (method === 'GET' && path === '/reset-password') {
         response = await handleResetPasswordPage(request, env);
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      if (method === 'GET' && path === '/verify-email') {
+        response = await handleVerifyEmail(request, env);
+        logAuthEvent(logger, {
+          event: 'email_verification',
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          statusCode: response.status,
+          correlationId,
+        });
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 

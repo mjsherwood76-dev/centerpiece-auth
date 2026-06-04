@@ -34,6 +34,7 @@ import { validateRedirectUrl } from '../security/redirectValidator.js';
 import { isAdminDomain } from '../security/platformDomains.js';
 import { loadTenantBranding } from '../branding.js';
 import { sendWelcomeEmail } from '../email/send.js';
+import { maybeSendVerificationForGatedTenant } from './emailVerification.js';
 import { parseRequestBody } from '../util/parseRequestBody.js';
 import { buildDeviceLabel, buildDeviceFingerprint } from '../security/deviceLabel.js';
 
@@ -131,6 +132,13 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   // ── Create tenant membership (customer only — per security rules) ──
   const membershipId = generateUUID();
   await db.ensureMembership(membershipId, userId, tenantId);
+
+  // ── Gated-tenant email verification (Phase 3.25, non-blocking) ──
+  // On a gated tenant, send a one-time verification link; email_verified stays
+  // false until the link is used. No-op on ungated tenants.
+  if (tenantId) {
+    await maybeSendVerificationForGatedTenant(env, db, tenantId, { id: userId, email });
+  }
 
   // ── Send welcome email (non-blocking) ──
   const branding = await loadTenantBranding(tenantParam || null, env);

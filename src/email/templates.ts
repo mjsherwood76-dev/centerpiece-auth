@@ -40,6 +40,12 @@ export interface WelcomeEmailData {
   loginUrl: string;
 }
 
+export interface EmailVerificationEmailData {
+  branding: EmailBranding;
+  verificationUrl: string;
+  expiresInMinutes: number;
+}
+
 export interface PasswordChangedEmailData {
   branding: EmailBranding;
   userEmail: string;
@@ -252,6 +258,50 @@ If you didn't request a password reset, you can safely ignore this email. Your p
     html: buildBaseLayout(content, data.branding),
     text,
     subject: `Reset your password — ${data.branding.storeName}`,
+  };
+}
+
+/**
+ * Build the email-verification email (gated-tenant registration).
+ *
+ * Mirrors the password-reset layout: a single branded CTA to a one-time
+ * verification link that expires after `expiresInMinutes`.
+ */
+export function buildEmailVerificationEmail(data: EmailVerificationEmailData): EmailContent {
+  const storeName = escapeHtml(data.branding.storeName);
+
+  const content = `
+<h1 style="margin:0 0 16px;font-size:24px;font-weight:600;color:#111827;font-family:${FONT_FAMILY};">
+  Verify Your Email
+</h1>
+<p style="margin:0 0 8px;font-size:15px;color:#374151;line-height:1.6;font-family:${FONT_FAMILY};">
+  Confirm your email address to finish setting up your ${storeName} account.
+</p>
+<p style="margin:0 0 24px;font-size:15px;color:#374151;line-height:1.6;font-family:${FONT_FAMILY};">
+  Click the button below to verify. This link will expire in ${data.expiresInMinutes} minutes.
+</p>
+${buildCtaButton(data.verificationUrl, 'Verify Email', data.branding.primaryColor)}
+<p style="margin:24px 0 0;font-size:13px;color:#6b7280;line-height:1.5;font-family:${FONT_FAMILY};">
+  If you didn't create this account, you can safely ignore this email.
+</p>
+<p style="margin:12px 0 0;font-size:12px;color:#9ca3af;word-break:break-all;font-family:${FONT_FAMILY};">
+  ${escapeHtml(data.verificationUrl)}
+</p>`;
+
+  const text = `Verify Your Email
+
+Confirm your email address to finish setting up your ${data.branding.storeName} account.
+
+Click the link below to verify. This link will expire in ${data.expiresInMinutes} minutes.
+
+${data.verificationUrl}
+
+If you didn't create this account, you can safely ignore this email.`;
+
+  return {
+    html: buildBaseLayout(content, data.branding),
+    text,
+    subject: `Verify your email — ${data.branding.storeName}`,
   };
 }
 

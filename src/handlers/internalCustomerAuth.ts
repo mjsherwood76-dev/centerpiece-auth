@@ -79,6 +79,7 @@ import {
   generateUUID,
 } from '../crypto/refreshTokens.js';
 import { requireInternalSecret } from '../security/internalSecret.js';
+import { maybeSendVerificationForGatedTenant } from './emailVerification.js';
 import { buildDeviceLabel, buildDeviceFingerprint } from '../security/deviceLabel.js';
 import { loadTenantBranding } from '../branding.js';
 import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../email/send.js';
@@ -190,7 +191,7 @@ async function validateTenantOrigin(
  */
 async function signCustomerAccessToken(
   env: Env,
-  user: { id: string; email: string; name: string },
+  user: { id: string; email: string; name: string; emailVerified: boolean },
   ttlSeconds: number,
 ): Promise<string> {
   return signJwt(
@@ -199,6 +200,7 @@ async function signCustomerAccessToken(
       email: user.email,
       name: user.name || '',
       iss: env.AUTH_DOMAIN,
+      emailVerified: user.emailVerified,
     }),
     env.JWT_PRIVATE_KEY,
     ttlSeconds,
@@ -208,7 +210,7 @@ async function signCustomerAccessToken(
 async function issueCustomerTokens(
   request: Request,
   env: Env,
-  user: { id: string; email: string; name: string },
+  user: { id: string; email: string; name: string; emailVerified: boolean },
 ): Promise<CustomerAuthSuccess> {
   const ttlSeconds = parseInt(env.ACCESS_TOKEN_TTL_SECONDS || '900', 10);
 
@@ -346,6 +348,7 @@ async function handleCustomerLogin(request: Request, env: Env): Promise<Response
     id: user.id,
     email: user.email,
     name: user.name,
+    emailVerified: user.email_verified === 1,
   });
 
   logAuthEvent(logger, {
@@ -435,10 +438,17 @@ async function handleCustomerRegister(request: Request, env: Env): Promise<Respo
   // Customer membership only.
   await db.ensureMembership(generateUUID(), userId, tenantId);
 
+  // On a gated tenant, send a one-time email-verification link (no-op otherwise).
+  await maybeSendVerificationForGatedTenant(env, db, tenantId, { id: userId, email });
+
   const success = await issueCustomerTokens(request, env, {
     id: userId,
     email,
     name: displayName,
+    // Freshly registered — email not yet verified. On a gated tenant the
+    // verification email is sent below; the claim flips to true only after the
+    // verify-email link is used (handlers/verifyEmail.ts).
+    emailVerified: false,
   });
 
   logAuthEvent(logger, {
@@ -633,7 +643,7 @@ async function handleCustomerRefresh(request: Request, env: Env): Promise<Respon
   const ttlSeconds = parseInt(env.ACCESS_TOKEN_TTL_SECONDS || '900', 10);
   const accessToken = await signCustomerAccessToken(
     env,
-    { id: user.id, email: user.email, name: user.name },
+    { id: user.id, email: user.email, name: user.name, emailVerified: user.email_verified === 1 },
     ttlSeconds,
   );
 

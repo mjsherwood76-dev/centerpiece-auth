@@ -504,6 +504,48 @@ export class AuthDB {
     return row;
   }
 
+  // ─── Email Verification Tokens (Phase 3.25) ─────────────
+
+  async insertEmailVerificationToken(token: {
+    id: string;
+    user_id: string;
+    token_hash: string;
+    expires_at: number;
+    created_at: number;
+  }): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO email_verification_tokens (id, user_id, token_hash, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .bind(token.id, token.user_id, token.token_hash, token.expires_at, token.created_at)
+      .run();
+  }
+
+  /**
+   * One-shot consume of an email-verification token by SHA-256 hash. Requires
+   * `consumed_at IS NULL` and marks it consumed. A second presentation of the
+   * same token returns null (already consumed). Expiry is checked by the caller.
+   */
+  async consumeEmailVerificationToken(
+    tokenHash: string
+  ): Promise<{ user_id: string; expires_at: number } | null> {
+    const row = await this.db
+      .prepare(
+        'SELECT user_id, expires_at FROM email_verification_tokens WHERE token_hash = ? AND consumed_at IS NULL'
+      )
+      .bind(tokenHash)
+      .first<{ user_id: string; expires_at: number }>();
+    if (!row) return null;
+
+    await this.db
+      .prepare('UPDATE email_verification_tokens SET consumed_at = ? WHERE token_hash = ?')
+      .bind(Math.floor(Date.now() / 1000), tokenHash)
+      .run();
+
+    return row;
+  }
+
   // ─── OAuth States ───────────────────────────────────────
 
   async insertOAuthState(state: {

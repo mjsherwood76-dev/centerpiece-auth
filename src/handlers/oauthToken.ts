@@ -268,7 +268,7 @@ async function issueTokens(
   env: Env,
   db: AuthDB,
   params: {
-    user: { id: string; email: string; name: string | null };
+    user: { id: string; email: string; name: string | null; email_verified: number };
     clientId: string;
     scopes: string[];
     /** When set (refresh grant), reuse the already-rotated refresh token instead of minting a family. */
@@ -284,6 +284,11 @@ async function issueTokens(
     email: params.user.email,
     name: params.user.name || '',
     iss: env.AUTH_DOMAIN,
+    // Reflect the persisted verification state. For OAuth-linked accounts this
+    // was set true at link time only when the provider confirmed the email
+    // (repo AI_RULES OAuth-linking rule). Keeps the platform-wide claim correct;
+    // Valhallan itself uses the email/PIN path, not customer OAuth.
+    emailVerified: params.user.email_verified === 1,
   });
   // TODO(5.7): platform-api ignores `act_as` until Phase 5.7 wires per-agent
   // RBAC. Until then a delegated-agent token has the same authority as a direct

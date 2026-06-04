@@ -17,13 +17,14 @@ import {
   buildPasswordResetEmail,
   buildWelcomeEmail,
   buildPasswordChangedEmail,
+  buildEmailVerificationEmail,
   extractColorsFromBranding,
   type EmailBranding,
 } from './templates.js';
 
 // ─── Log Helpers ────────────────────────────────────────────
 
-type EmailType = 'password_reset' | 'welcome' | 'password_changed';
+type EmailType = 'password_reset' | 'welcome' | 'password_changed' | 'email_verification';
 
 interface EmailLogEvent {
   event: 'email.sent' | 'email.failed' | 'email.skipped';
@@ -184,6 +185,127 @@ export async function sendPasswordResetEmail(
     const emailContent = buildPasswordResetEmail({
       branding: emailBranding,
       resetUrl,
+      expiresInMinutes,
+    });
+
+    const result = await sendViaSendGrid(env.SENDGRID_API_KEY, {
+      to: { email: to },
+      from: { email: env.EMAIL_FROM, name: env.EMAIL_FROM_NAME },
+      subject: emailContent.subject,
+      html: emailContent.html,
+      text: emailContent.text,
+    });
+
+    if (result.success) {
+      logEmailEvent(logger, correlationId, {
+        event: 'email.sent',
+        type: emailType,
+        to: redacted,
+        statusCode: result.statusCode,
+        tenantId: context?.tenantId,
+        userId: context?.userId,
+      });
+    } else {
+      logEmailEvent(logger, correlationId, {
+        event: 'email.failed',
+        type: emailType,
+        to: redacted,
+        statusCode: result.statusCode,
+        error: result.error,
+        failureClass: result.failureClass,
+        tenantId: context?.tenantId,
+        userId: context?.userId,
+      });
+    }
+  } catch (err) {
+    logEmailEvent(logger, correlationId, {
+      event: 'email.failed',
+      type: emailType,
+      to: redacted,
+      error: err instanceof Error ? err.message : 'Unknown error',
+      tenantId: context?.tenantId,
+      userId: context?.userId,
+    });
+  }
+}
+
+/**
+ * Send an email-verification email (gated-tenant registration).
+ * Non-blocking: logs failure but never throws. Mirrors the password-reset
+ * delivery path (platform-api template renderer → SendGrid rollback fallback).
+ */
+export async function sendEmailVerificationEmail(
+  env: Env,
+  to: string,
+  verificationUrl: string,
+  branding: TenantBranding,
+  context?: { tenantId?: string; userId?: string; logger?: Logger; correlationId?: string }
+): Promise<void> {
+  const emailType: EmailType = 'email_verification';
+  const redacted = redactEmail(to);
+  const logger = context?.logger ?? null;
+  const correlationId = context?.correlationId ?? 'unknown';
+
+  const templateResult = await tryTemplateRenderer(env, {
+    templateId: 'email-verification',
+    tenantId: context?.tenantId ?? branding.tenantId,
+    recipient: { email: to },
+    variables: {
+      customerName: to.split('@')[0] || 'there',
+      verificationUrl,
+      expiresIn: '60 minutes',
+    },
+    idempotencyKey: context?.userId ? `auth:${context.userId}:email-verification:${verificationUrl}` : undefined,
+  });
+  if (templateResult) {
+    logEmailEvent(logger, correlationId, {
+      event: templateResult.status === 'sent' ? 'email.sent' : 'email.skipped',
+      type: emailType,
+      to: redacted,
+      reason: templateResult.reason,
+      tenantId: context?.tenantId,
+      userId: context?.userId,
+    });
+    return;
+  }
+
+  if (!isSendGridRollbackAllowed(env)) {
+    logEmailEvent(logger, correlationId, {
+      event: 'email.skipped',
+      type: emailType,
+      to: redacted,
+      reason: 'transactional_sendgrid_disabled',
+      tenantId: context?.tenantId,
+      userId: context?.userId,
+    });
+    return;
+  }
+
+  if (!env.SENDGRID_API_KEY) {
+    logEmailEvent(logger, correlationId, {
+      event: 'email.skipped',
+      type: emailType,
+      to: redacted,
+      reason: 'SENDGRID_API_KEY not configured',
+      tenantId: context?.tenantId,
+      userId: context?.userId,
+    });
+    return;
+  }
+
+  console.log(JSON.stringify({
+    event: 'email.provider_split_rollback',
+    type: emailType,
+    reason: 'transactional_sendgrid_rollback_active',
+  }));
+
+  try {
+    const emailBranding = buildEmailBranding(branding);
+    const expiresInMinutes = 60;
+
+    const emailContent = buildEmailVerificationEmail({
+      branding: emailBranding,
+      verificationUrl,
       expiresInMinutes,
     });
 
