@@ -33,6 +33,17 @@ binding = "TENANT_CONFIGS"
 id = "b8f70a1c8c274821970710fe8df10096"
 preview_id = "ee5142299d73451bbf76481b8b4d0c60"
 
+# Rate Limiting KV (Phase 3.12) — shared namespace across all public Workers
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "e874a13bb95d49d89a05de4b59adf984"
+
+# Analytics Engine — rate-limit abuse-detection events (Phase 3.12)
+# Shared dataset across all public Workers for cross-Worker correlation.
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "centerpiece_analytics"
+
 [[services]]
 binding = "PLATFORM_API"
 service = "centerpiece-platform-api"
@@ -113,6 +124,16 @@ id = "ff8cb7cba7a14257951a894940c77fea"
 [[env.staging.kv_namespaces]]
 binding = "TENANT_CONFIGS"
 id = "ee5142299d73451bbf76481b8b4d0c60"
+
+# Rate Limiting KV (Phase 3.12) — staging shared namespace
+[[env.staging.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "b2fa788977b2492d9da00a56ba3fa180"
+
+# Analytics Engine — rate-limit abuse-detection events (staging, Phase 3.12)
+[[env.staging.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "centerpiece_analytics_staging"
 
 [[env.staging.services]]
 binding = "PLATFORM_API"

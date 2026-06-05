@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "dependencies": {
+    "@centerpiece/site-compositor": "file:../centerpiece-site-compositor"
+  },
   "scripts": {
     "build": "node scripts/build-worker.js",
     "build:worker": "node scripts/build-worker.js",

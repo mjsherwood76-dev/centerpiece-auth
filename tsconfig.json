@@ -7,6 +7,10 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "paths": {
+      "@centerpiece/site-compositor": ["../centerpiece-site-compositor/src/index.ts"],
+      "@centerpiece/site-compositor/security": ["../centerpiece-site-compositor/src/security/index.ts"]
+    },
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "types": ["@cloudflare/workers-types"]

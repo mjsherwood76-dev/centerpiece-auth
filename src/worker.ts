@@ -47,7 +47,7 @@ import { handleCustomerRoutes } from './handlers/customers.js';
 import { handleAdminOauthClientRoutes } from './handlers/adminOauthClients.js';
 import { handleOauthAuthorize, handleOauthAuthorizeDecision } from './handlers/oauthAuthorize.js';
 import { handleOauthToken } from './handlers/oauthToken.js';
-import { checkRateLimit } from './security/rateLimit.js';
+import { applyRateLimit } from './security/applyRateLimit.js';
 import { addSecurityHeaders, handleCorsPreflightValidated } from './security/headers.js';
 import { logAuthEvent } from './security/auditLog.js';
 
@@ -84,26 +84,14 @@ export default {
     }
 
     try {
-      // --- Rate limiting for sensitive endpoints ---
-      const rateLimitedRoutes = ['/api/login', '/api/register', '/api/forgot-password', '/api/reset-password', '/api/switch-tenant', '/api/auth/step-up'];
-      if (method === 'POST' && rateLimitedRoutes.includes(path)) {
-        const rateLimitResult = await checkRateLimit(clientIp, path, env);
-        if (!rateLimitResult.allowed) {
-          logAuthEvent(logger, {
-            event: 'rate_limit_exceeded',
-            ip: clientIp,
-            route: path,
-            userAgent: request.headers.get('User-Agent'),
-            correlationId,
-          });
-          return addSecurityHeaders(new Response(JSON.stringify({ error: 'Too many requests. Please try again later.' }), {
-            status: 429,
-            headers: {
-              'Content-Type': 'application/json',
-              'Retry-After': String(rateLimitResult.retryAfterSeconds),
-            },
-          }), trace.getResponseHeaders(), request, env);
-        }
+      // --- Rate limiting (Phase 3.12) ---
+      // Shared RateLimiter + AUTH_POLICIES from @centerpiece/site-compositor.
+      // Runs EARLY (after CORS preflight, before route dispatch). Endpoints with
+      // no matching policy — health, JWKS, .well-known, internal service-to-
+      // service routes, OAuth provider callbacks — pass through untouched.
+      const rateLimited = await applyRateLimit(request, env, logger, correlationId);
+      if (rateLimited) {
+        return addSecurityHeaders(rateLimited, trace.getResponseHeaders(), request, env);
       }
 
       let response: Response;

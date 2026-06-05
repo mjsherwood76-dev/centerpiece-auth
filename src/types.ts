@@ -12,6 +12,15 @@ export interface Env {
   CANONICAL_INPUTS: KVNamespace;
   TENANT_CONFIGS: KVNamespace;
 
+  // Shared rate-limit KV (Phase 3.12) — sliding-window counters for the shared
+  // RateLimiter from @centerpiece/site-compositor/security.
+  RATE_LIMIT_KV: KVNamespace;
+
+  // Analytics Engine dataset (Phase 3.12) — receives `rate_limit_hit` events
+  // for cross-Worker abuse-detection correlation. Shared dataset name across
+  // all public Workers.
+  ANALYTICS: AnalyticsEngineDataset;
+
   // Service Bindings
   // PLATFORM_API is a fetch-capable Cloudflare Worker service binding to
   // centerpiece-platform-api. Auth calls the internal transactional email
