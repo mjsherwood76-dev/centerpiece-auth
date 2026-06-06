@@ -168,6 +168,30 @@ test/
 
 ---
 
+## Testing
+
+### Unit tests (`npm test`)
+
+Test files live in `test/**/*.test.ts` and use `node:test` + `tsx`. Unit tests
+mock the D1 binding or use test-helper DB stubs — they exercise handler logic,
+not SQL schema correctness.
+
+### Schema integration tests (`npm run test:integration`)
+
+`test/integration.schema.test.ts` runs every `db.prepare(...)` SQL path against an
+in-memory `better-sqlite3` database initialized with all `migrations/*.sql` files.
+
+**Rule:** Any new raw-SQL path (`db.prepare(...)`) or new migration column/table
+MUST have a corresponding integration test. Run `npm run test:integration` before
+each commit that adds or changes SQL.
+
+`npm run deploy:staging` and `npm run deploy` run `test:integration` automatically
+before deploying — a failing schema test aborts the deploy.
+
+See workspace `AI_RULES.md §SCHEMA TEST DISCIPLINE` for the full pattern.
+
+---
+
 ## Logging Policy
 
 Never log PII fields (email, phone, address, password, SSN, DOB, payment card data, firstName, lastName, full_name, auth tokens). Use opaque IDs (userId, tenantId) for debugging. CI greps `console.log` patterns against a PII denylist (`scripts/check-no-pii-logging.mjs`). To whitelist a deliberate case, add `// pii-allowed: <reason>` on the line immediately above the console call.
