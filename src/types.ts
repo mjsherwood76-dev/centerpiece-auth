@@ -74,6 +74,10 @@ export interface Env {
   // Staging:    "https://auth.centerpiecelab.dev"
   AUTH_ISSUER_URL: string;
 
+  // Feature flag: set to 'false' or '0' to disable the HIBP breach check
+  // without a redeploy. Absent or any other value = enabled (default).
+  PASSWORD_BREACH_CHECK_ENABLED?: string;
+
   // Secrets (OAuth providers — wired in Session 4)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;

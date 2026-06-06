@@ -295,6 +295,9 @@ function mockEnv(store: Store, tenantConfigs?: KVNamespace): Env {
     PLATFORM_DOMAIN: 'centerpiecelab.dev',
     AUTH_ISSUER_URL: 'https://auth.centerpiecelab.dev',
     INTERNAL_SECRET: INTERNAL_SECRET,
+    // Disable breach check in unit tests — breach-check logic is tested in
+    // test/security/breachedPassword.test.ts; here we test handler logic only.
+    PASSWORD_BREACH_CHECK_ENABLED: 'false',
   } as unknown as Env;
 }
 

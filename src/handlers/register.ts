@@ -41,6 +41,7 @@ import { loadTenantGating } from '../security/tenantGating.js';
 import { isEmailAllowedForTenant } from '../security/emailDomainCheck.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
+import { isPasswordBreached } from '../security/breachedPassword.js';
 
 const logger = new ConsoleJsonLogger();
 
@@ -100,6 +101,11 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
 
   if (password.length < 8) {
     return errorRedirect(env, tenantParam, redirectUrl, 'password_weak');
+  }
+
+  // HIBP k-anonymity breach check (fail-open: HIBP unreachable → allow).
+  if (await isPasswordBreached(password, env)) {
+    return errorRedirect(env, tenantParam, redirectUrl, 'password_breached');
   }
 
   if (password !== confirmPassword) {

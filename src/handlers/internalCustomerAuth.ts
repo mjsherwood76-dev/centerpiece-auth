@@ -87,6 +87,7 @@ import { loadTenantBranding } from '../branding.js';
 import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../email/send.js';
 import { ConsoleJsonLogger } from '../core/logger.js';
 import { logAuthEvent } from '../security/auditLog.js';
+import { isPasswordBreached } from '../security/breachedPassword.js';
 import { jsonResponse } from '../util/httpJson.js';
 
 const logger = new ConsoleJsonLogger();
@@ -436,6 +437,11 @@ async function handleCustomerRegister(request: Request, env: Env): Promise<Respo
   }
   if (password.length < 8) {
     return jsonResponse({ error: 'password_weak' }, 400);
+  }
+
+  // HIBP k-anonymity breach check (fail-open: HIBP unreachable → allow).
+  if (await isPasswordBreached(password, env)) {
+    return jsonResponse({ error: 'password_breached' }, 400);
   }
 
   const validOrigin = await validateTenantOrigin(env, tenantId, tenantOrigin);
@@ -805,6 +811,11 @@ async function handleCustomerResetPassword(request: Request, env: Env): Promise<
   }
   if (newPassword.length < 8) {
     return jsonResponse({ error: 'invalid_request' }, 400);
+  }
+
+  // HIBP k-anonymity breach check (fail-open: HIBP unreachable → allow).
+  if (await isPasswordBreached(newPassword, env)) {
+    return jsonResponse({ error: 'password_breached' }, 400);
   }
 
   const validOrigin = await validateTenantOrigin(env, tenantId, tenantOrigin);

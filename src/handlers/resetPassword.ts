@@ -35,6 +35,7 @@ import { loadTenantBranding } from '../branding.js';
 import { sendPasswordChangedEmail } from '../email/send.js';
 import { parseRequestBody } from '../util/parseRequestBody.js';
 import { validateRedirectUrl } from '../security/redirectValidator.js';
+import { isPasswordBreached } from '../security/breachedPassword.js';
 
 /**
  * Handle POST /api/reset-password
@@ -71,6 +72,11 @@ export async function handleResetPassword(request: Request, env: Env): Promise<R
 
   if (newPassword.length < 8) {
     return errorRedirect(env, tenantParam, 'password_weak', token);
+  }
+
+  // HIBP k-anonymity breach check (fail-open: HIBP unreachable → allow).
+  if (await isPasswordBreached(newPassword, env)) {
+    return errorRedirect(env, tenantParam, 'password_breached', token);
   }
 
   if (newPassword !== confirmPassword) {
