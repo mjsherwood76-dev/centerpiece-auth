@@ -33,6 +33,7 @@ import { validateRedirectUrl, AUTH_CONSENT_TENANT } from '../security/redirectVa
 import { isAdminDomain } from '../security/platformDomains.js';
 import { parseRequestBody } from '../util/parseRequestBody.js';
 import { buildDeviceLabel, buildDeviceFingerprint } from '../security/deviceLabel.js';
+import { PKCE_REANCHOR_TTL_SECONDS } from './pkceInit.js';
 
 /**
  * Handle POST /api/login
@@ -211,6 +212,15 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   // token exchange can resolve the verifier (which the SPA's localStorage
   // may have lost across the bounce-tracking-affected redirect).
   if (aud === 'admin' && pkceSession) {
+    // Re-anchor the PKCE session's expiry to this authentication event. The
+    // session was minted when the SPA first auto-redirected (possibly many
+    // minutes ago if the login page sat open); without this, a long dwell on
+    // the login page expires the session before token exchange. After auth,
+    // only the callback→exchange hop remains, so a short window suffices.
+    await db.refreshPkceSessionExpiry(
+      pkceSession,
+      loginIat + PKCE_REANCHOR_TTL_SECONDS,
+    );
     callbackUrl.searchParams.set('pkce_session_id', pkceSession);
   }
 

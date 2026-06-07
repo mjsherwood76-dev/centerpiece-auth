@@ -32,8 +32,36 @@ import { AuthDB } from '../db.js';
 import { generateUUID } from '../crypto/refreshTokens.js';
 import { jsonError } from '../util/httpJson.js';
 
-/** TTL for pkce_sessions rows. 10 minutes — same as oauth_states / auth_codes. */
-const PKCE_SESSION_TTL_SECONDS = 10 * 60;
+/**
+ * Initial TTL for pkce_sessions rows.
+ *
+ * 30 minutes — this window must cover the entire gap between the SPA minting
+ * the session (it does so eagerly when it first auto-redirects an unauthenticated
+ * user to login) and the user actually completing authentication on the auth
+ * login page. A login page left open / restored on browser launch / sitting
+ * behind a Cloudflare challenge can dwell well past the old 10-min budget,
+ * which expired the session before token exchange ("PKCE session has expired").
+ * 30 min matches the admin SPA's idle-timeout window. The verifier is a
+ * single-use nonce gated by the 60-second auth code, so a longer TTL has
+ * negligible security cost.
+ *
+ * NOTE: the auth event itself re-anchors the expiry to a much shorter window
+ * (PKCE_REANCHOR_TTL_SECONDS) — see refreshPkceSessionExpiry call sites in
+ * handlers/login.ts and oauth/callback.ts. This initial TTL is the safety net
+ * for the pre-auth dwell only.
+ */
+const PKCE_SESSION_TTL_SECONDS = 30 * 60;
+
+/**
+ * Re-anchor TTL applied at the moment of authentication.
+ *
+ * Once the user has actually authenticated (password submit or OAuth callback),
+ * the only remaining hop is the 302 → SPA callback page → POST /api/token, which
+ * takes seconds. We reset the session's expiry to now + 5 min at that point so
+ * the pre-auth dwell on the login page becomes irrelevant. 5 min is generous
+ * cover for that final hop while keeping the post-auth window tight.
+ */
+export const PKCE_REANCHOR_TTL_SECONDS = 5 * 60;
 
 /** Minimum + maximum verifier length per RFC 7636 (PKCE). */
 const VERIFIER_MIN_LENGTH = 43;

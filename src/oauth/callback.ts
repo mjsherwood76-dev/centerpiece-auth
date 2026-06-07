@@ -33,6 +33,7 @@ import {
 import { validateRedirectUrl } from '../security/redirectValidator.js';
 import { isAdminDomain } from '../security/platformDomains.js';
 import { buildDeviceLabel, buildDeviceFingerprint } from '../security/deviceLabel.js';
+import { PKCE_REANCHOR_TTL_SECONDS } from '../handlers/pkceInit.js';
 
 /**
  * Handle the shared OAuth callback logic after a provider extracts the user profile.
@@ -136,6 +137,13 @@ export async function handleOAuthCallback(
   // local storage may have been wiped by Chrome's bounce-tracking intervention
   // during the OAuth round trip, but URL params survive the navigation.
   if (stateData.pkceSessionId) {
+    // Re-anchor the PKCE session's expiry to this authentication event so a
+    // long dwell on the provider's consent/login screen doesn't expire the
+    // session before token exchange. Only the callback→exchange hop remains.
+    await db.refreshPkceSessionExpiry(
+      stateData.pkceSessionId,
+      loginIat + PKCE_REANCHOR_TTL_SECONDS,
+    );
     callbackUrl.searchParams.set('pkce_session_id', stateData.pkceSessionId);
   }
 

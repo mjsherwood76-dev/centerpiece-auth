@@ -651,6 +651,21 @@ export class AuthDB {
     return row;
   }
 
+  /**
+   * Re-anchor a pkce_sessions row's expiry to the moment of authentication.
+   *
+   * The session is minted eagerly when the SPA first redirects to login, but is
+   * only consumed at token exchange after the full OAuth round trip. Resetting
+   * expires_at at the auth event means a long dwell on the login page no longer
+   * expires the session before exchange. No-op if the row no longer exists.
+   */
+  async refreshPkceSessionExpiry(sessionId: string, expiresAt: number): Promise<void> {
+    await this.db
+      .prepare('UPDATE pkce_sessions SET expires_at = ? WHERE id = ?')
+      .bind(expiresAt, sessionId)
+      .run();
+  }
+
   /** Background cleanup — removes expired pkce_sessions rows. */
   async cleanupExpiredPkceSessions(): Promise<number> {
     const now = Math.floor(Date.now() / 1000);
