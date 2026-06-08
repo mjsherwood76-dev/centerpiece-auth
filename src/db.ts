@@ -13,13 +13,15 @@
 export type {
   UserRow,
   TenantMembershipRow,
+  InviteRow,
   OAuthAccountRow,
   AuthCodeRow,
   RefreshTokenRow,
 } from './db.types.js';
 
-import type { UserRow, TenantMembershipRow, OAuthAccountRow, AuthCodeRow, RefreshTokenRow } from './db.types.js';
+import type { UserRow, TenantMembershipRow, InviteRow, OAuthAccountRow, AuthCodeRow, RefreshTokenRow } from './db.types.js';
 import * as memberships from './db.memberships.js';
+import * as invites from './db.invites.js';
 
 // ─── Database Helper Class ──────────────────────────────────
 
@@ -183,6 +185,46 @@ export class AuthDB {
 
   async countOwnerMemberships(userId: string): Promise<number> {
     return memberships.countOwnerMemberships(this.db, userId);
+  }
+
+  // ─── Tenant Invites (delegated to db.invites) ───────────
+
+  async createInvite(invite: {
+    id: string;
+    email: string;
+    tenantId: string;
+    context: 'seller' | 'supplier' | 'platform';
+    subRole: string;
+    tokenHash: string;
+    invitedBy: string;
+  }): Promise<void> {
+    return invites.createInvite(this.db, invite);
+  }
+
+  async hasPendingInvite(
+    email: string, tenantId: string, context: string, subRole: string,
+  ): Promise<boolean> {
+    return invites.hasPendingInvite(this.db, email, tenantId, context, subRole);
+  }
+
+  async getInvitesByTenant(tenantId: string): Promise<InviteRow[]> {
+    return invites.getInvitesByTenant(this.db, tenantId);
+  }
+
+  async getInviteByTokenHash(tokenHash: string): Promise<InviteRow | null> {
+    return invites.getInviteByTokenHash(this.db, tokenHash);
+  }
+
+  async markInviteAccepted(inviteId: string): Promise<boolean> {
+    return invites.markInviteAccepted(this.db, inviteId);
+  }
+
+  async deleteInvite(inviteId: string): Promise<boolean> {
+    return invites.deleteInvite(this.db, inviteId);
+  }
+
+  async deleteExpiredInvites(): Promise<number> {
+    return invites.deleteExpiredInvites(this.db);
   }
 
   // ─── OAuth Accounts ─────────────────────────────────────

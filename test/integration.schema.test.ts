@@ -621,3 +621,83 @@ describe('S4 — email_verification_tokens: all raw-SQL paths', () => {
     ).bind(Math.floor(Date.now() / 1000), 'hash_ev_token_1').run();
   });
 });
+
+// ─── S2 (Fix_Team_Invites): tenant_invites queries ───────────
+
+describe('Team-Invites — tenant_invites: all raw-SQL paths', () => {
+  let db: ReturnType<typeof wrapDb>;
+  let rawDb: Database.Database;
+
+  before(() => {
+    rawDb = buildSchemaDb();
+    db = wrapDb(rawDb);
+  });
+
+  after(() => rawDb.close());
+
+  it("createInvite: DELETE expired/unaccepted row for tuple", () => {
+    db.prepare(
+      `DELETE FROM tenant_invites
+       WHERE email = ? AND tenant_id = ? AND context = ? AND sub_role = ?
+         AND accepted_at IS NULL
+         AND expires_at <= datetime('now')`
+    ).bind('invitee@example.com', TEST_TENANT_ID, 'seller', 'manager').run();
+  });
+
+  it('createInvite: INSERT with datetime expiry arithmetic', () => {
+    db.prepare(
+      `INSERT INTO tenant_invites
+         (id, email, tenant_id, context, sub_role, token_hash, invited_by, created_at, expires_at, accepted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now', ?), NULL)`
+    ).bind(
+      'inv-1', 'invitee@example.com', TEST_TENANT_ID, 'seller', 'manager',
+      'hash_invite_token_1', TEST_USER_ID, '+7 days'
+    ).run();
+  });
+
+  it('hasPendingInvite: SELECT 1 unaccepted + unexpired for tuple', () => {
+    const result = db.prepare(
+      `SELECT 1 FROM tenant_invites
+       WHERE email = ? AND tenant_id = ? AND context = ? AND sub_role = ?
+         AND accepted_at IS NULL
+         AND expires_at > datetime('now')
+       LIMIT 1`
+    ).bind('invitee@example.com', TEST_TENANT_ID, 'seller', 'manager').first();
+    assert.ok(result !== undefined, 'pending-invite check executes');
+  });
+
+  it('getInvitesByTenant: SELECT pending by tenant', () => {
+    const result = db.prepare(
+      `SELECT * FROM tenant_invites
+       WHERE tenant_id = ?
+         AND accepted_at IS NULL
+         AND expires_at > datetime('now')
+       ORDER BY created_at DESC`
+    ).bind(TEST_TENANT_ID).all();
+    assert.ok(Array.isArray(result.results), 'invites-by-tenant query executes');
+  });
+
+  it('getInviteByTokenHash: SELECT * by token_hash', () => {
+    const result = db.prepare('SELECT * FROM tenant_invites WHERE token_hash = ?')
+      .bind('hash_invite_token_1').first();
+    assert.ok(result !== null, 'invite lookup by token hash executes');
+  });
+
+  it('markInviteAccepted: UPDATE accepted_at WHERE unaccepted + unexpired', () => {
+    db.prepare(
+      `UPDATE tenant_invites SET accepted_at = datetime('now')
+       WHERE id = ? AND accepted_at IS NULL AND expires_at > datetime('now')`
+    ).bind('inv-1').run();
+  });
+
+  it('deleteInvite: DELETE by id', () => {
+    db.prepare('DELETE FROM tenant_invites WHERE id = ?').bind('inv-1').run();
+  });
+
+  it('deleteExpiredInvites: DELETE expired unaccepted', () => {
+    db.prepare(
+      `DELETE FROM tenant_invites
+       WHERE accepted_at IS NULL AND expires_at <= datetime('now')`
+    ).bind().run();
+  });
+});

@@ -28,6 +28,19 @@ export interface TenantMembershipRow {
   created_at: string;
 }
 
+export interface InviteRow {
+  id: string;
+  email: string;            // lowercased
+  tenant_id: string;        // target tenant (or __platform__)
+  context: 'seller' | 'supplier' | 'platform';
+  sub_role: string;         // validated against CONTEXT_ROLES (no 'owner')
+  token_hash: string;       // SHA-256 hex of the single-use token; plaintext never stored
+  invited_by: string;       // userId of the granter
+  created_at: string;       // datetime('now') text
+  expires_at: string;       // created_at + 7d (ISO/datetime text)
+  accepted_at: string | null; // null until accepted (single-use)
+}
+
 export interface OAuthAccountRow {
   id: string;
   user_id: string;
