@@ -4,7 +4,7 @@ Session quickref. **Authority: workspace `AI_RULES.md` wins; this repo's `AI_RUL
 
 ## Purpose
 
-Centralized **identity provider** Worker. Email/password registration & login, OAuth (Google/Facebook/Apple/Microsoft), JWT (ES256) issuance with JWKS endpoint, refresh-token rotation with theft detection, password reset, tenant-branded login/register pages.
+Centralized **identity provider** Worker. Email/password registration & login, OAuth (Google), JWT (ES256) issuance with JWKS endpoint, refresh-token rotation with theft detection, password reset, tenant-branded login/register pages.
 
 - Production: `auth.centerpiecelab.com`
 - Staging: `centerpiece-auth-staging.mjsherwood76.workers.dev`
@@ -52,7 +52,7 @@ src/
 │                              # logout, forgotPassword, resetPassword,
 │                              # memberships, internalMemberships, internalUsers,
 │                              # customers
-├── oauth/                     # base, callback, google, facebook, apple, microsoft
+├── oauth/                     # base, callback, google
 └── pages/                     # renderer, login, register, resetPassword
 migrations/                    # D1 schema (0001_initial_schema.sql, …)
 ```
@@ -65,7 +65,7 @@ migrations/                    # D1 schema (0001_initial_schema.sql, …)
 
 **Vars**: `ENVIRONMENT`, `AUTH_DOMAIN`, `EMAIL_FROM=noreply@centerpiecelab.com`, `EMAIL_FROM_NAME=Centerpiece Lab`, `ACCESS_TOKEN_TTL_SECONDS=900` (15 min), `REFRESH_TOKEN_TTL_DAYS=30`, `AUTH_CODE_TTL_SECONDS=60`.
 
-**Secrets** (`wrangler secret put`): `JWT_PRIVATE_KEY` & `JWT_PUBLIC_KEY` (ES256 PEM, base64-encoded), `INTERNAL_SECRET`, `GOOGLE_CLIENT_ID/SECRET`, `FACEBOOK_APP_ID/SECRET`, `APPLE_CLIENT_ID/SECRET/KEY_ID/TEAM_ID/PRIVATE_KEY` (PEM b64), `MICROSOFT_CLIENT_ID/SECRET`, `SENDGRID_API_KEY` (Mail Send only).
+**Secrets** (`wrangler secret put`): `JWT_PRIVATE_KEY` & `JWT_PUBLIC_KEY` (ES256 PEM, base64-encoded), `INTERNAL_SECRET`, `GOOGLE_CLIENT_ID/SECRET`, `SENDGRID_API_KEY` (Mail Send only).
 
 ## Routes
 

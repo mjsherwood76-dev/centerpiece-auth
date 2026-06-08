@@ -16,7 +16,6 @@
  * Email linking rules (per Security Principles):
  * - If user exists with same email AND provider confirms email_verified → link
  * - If provider does NOT confirm email_verified → create separate user
- * - Apple: email is always verified; name only on first login
  */
 import type { Env } from '../types.js';
 import { AuthDB } from '../db.js';
@@ -179,7 +178,7 @@ async function resolveUser(db: AuthDB, profile: OAuthUserProfile): Promise<strin
     // User already linked to this provider — update name/avatar if provided
     const user = await db.getUserById(existingOAuth.user_id);
     if (user) {
-      // Update name if it was empty (e.g., Apple first-login name now available)
+      // Update name if it was empty (now available from the provider)
       if (profile.name && !user.name) {
         await db.updateUserName(user.id, profile.name);
       }

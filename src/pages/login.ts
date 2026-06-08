@@ -5,7 +5,7 @@
  *
  * Renders a branded login page with:
  * - Email + password form
- * - OAuth buttons (Google, Facebook, Apple, Microsoft)
+ * - OAuth buttons (Google)
  * - "Forgot password?" link
  * - "Don't have an account? Sign up" link
  *
@@ -138,18 +138,6 @@ export async function handleLoginPage(request: Request, env: Env): Promise<Respo
       <a class="btn-oauth" id="oauth-google" href="${escapeAttr(oauthBase)}/google?${oauthParams}">
         ${oauthIcons.google}
         Continue with Google
-      </a>
-      <a class="btn-oauth" id="oauth-facebook" href="${escapeAttr(oauthBase)}/facebook?${oauthParams}">
-        ${oauthIcons.facebook}
-        Continue with Facebook
-      </a>
-      <a class="btn-oauth" id="oauth-apple" href="${escapeAttr(oauthBase)}/apple?${oauthParams}">
-        ${oauthIcons.apple}
-        Continue with Apple
-      </a>
-      <a class="btn-oauth" id="oauth-microsoft" href="${escapeAttr(oauthBase)}/microsoft?${oauthParams}">
-        ${oauthIcons.microsoft}
-        Continue with Microsoft
       </a>
     </div>
 

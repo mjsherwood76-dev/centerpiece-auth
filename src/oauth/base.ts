@@ -16,7 +16,7 @@ import { validateRedirectUrl } from '../security/redirectValidator.js';
 
 // ─── Types ──────────────────────────────────────────────────
 
-export type OAuthProvider = 'google' | 'facebook' | 'apple' | 'microsoft';
+export type OAuthProvider = 'google';
 
 export interface OAuthUserProfile {
   provider: OAuthProvider;

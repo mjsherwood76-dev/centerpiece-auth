@@ -27,9 +27,6 @@ import { handlePkceInit } from './handlers/pkceInit.js';
 import { handleRefresh } from './handlers/refresh.js';
 import { handleLogout, handleLogoutAll } from './handlers/logout.js';
 import { handleGoogleOAuthInit, handleGoogleOAuthCallback } from './oauth/google.js';
-import { handleFacebookOAuthInit, handleFacebookOAuthCallback } from './oauth/facebook.js';
-import { handleAppleOAuthInit, handleAppleOAuthCallback } from './oauth/apple.js';
-import { handleMicrosoftOAuthInit, handleMicrosoftOAuthCallback } from './oauth/microsoft.js';
 import { handleForgotPassword } from './handlers/forgotPassword.js';
 import { handleResetPassword } from './handlers/resetPassword.js';
 import { handleResetPasswordPage } from './pages/resetPassword.js';
@@ -401,21 +398,6 @@ export default {
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
-      if (method === 'GET' && path === '/oauth/facebook') {
-        response = await handleFacebookOAuthInit(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
-      }
-
-      if (method === 'GET' && path === '/oauth/apple') {
-        response = await handleAppleOAuthInit(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
-      }
-
-      if (method === 'GET' && path === '/oauth/microsoft') {
-        response = await handleMicrosoftOAuthInit(request, env);
-        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
-      }
-
       // --- OAuth callback routes ---
       if (method === 'GET' && path === '/oauth/google/callback') {
         response = await handleGoogleOAuthCallback(request, env);
@@ -426,46 +408,6 @@ export default {
           userAgent: request.headers.get('User-Agent'),
           correlationId,
           details: { provider: 'google' },
-        });
-        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
-      }
-
-      if (method === 'GET' && path === '/oauth/facebook/callback') {
-        response = await handleFacebookOAuthCallback(request, env);
-        logAuthEvent(logger, {
-          event: 'oauth_callback',
-          ip: clientIp,
-          route: path,
-          userAgent: request.headers.get('User-Agent'),
-          correlationId,
-          details: { provider: 'facebook' },
-        });
-        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
-      }
-
-      // Apple uses form POST for callbacks (response_mode: form_post)
-      if (method === 'POST' && path === '/oauth/apple/callback') {
-        response = await handleAppleOAuthCallback(request, env);
-        logAuthEvent(logger, {
-          event: 'oauth_callback',
-          ip: clientIp,
-          route: path,
-          userAgent: request.headers.get('User-Agent'),
-          correlationId,
-          details: { provider: 'apple' },
-        });
-        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
-      }
-
-      if (method === 'GET' && path === '/oauth/microsoft/callback') {
-        response = await handleMicrosoftOAuthCallback(request, env);
-        logAuthEvent(logger, {
-          event: 'oauth_callback',
-          ip: clientIp,
-          route: path,
-          userAgent: request.headers.get('User-Agent'),
-          correlationId,
-          details: { provider: 'microsoft' },
         });
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }

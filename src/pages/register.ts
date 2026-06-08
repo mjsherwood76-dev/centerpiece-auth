@@ -5,7 +5,7 @@
  *
  * Renders a branded registration page with:
  * - Name, email, password, confirm password fields
- * - OAuth buttons (Google, Facebook, Apple, Microsoft)
+ * - OAuth buttons (Google)
  * - "Already have an account? Sign in" link
  *
  * English-only in this phase. Multi-locale auth pages deferred
@@ -81,18 +81,6 @@ export async function handleRegisterPage(request: Request, env: Env): Promise<Re
       <a class="btn-oauth" href="${escapeAttr(oauthBase)}/google?${oauthParams}">
         ${oauthIcons.google}
         Continue with Google
-      </a>
-      <a class="btn-oauth" href="${escapeAttr(oauthBase)}/facebook?${oauthParams}">
-        ${oauthIcons.facebook}
-        Continue with Facebook
-      </a>
-      <a class="btn-oauth" href="${escapeAttr(oauthBase)}/apple?${oauthParams}">
-        ${oauthIcons.apple}
-        Continue with Apple
-      </a>
-      <a class="btn-oauth" href="${escapeAttr(oauthBase)}/microsoft?${oauthParams}">
-        ${oauthIcons.microsoft}
-        Continue with Microsoft
       </a>
     </div>
 

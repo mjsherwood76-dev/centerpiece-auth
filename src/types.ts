@@ -78,16 +78,7 @@ export interface Env {
   // without a redeploy. Absent or any other value = enabled (default).
   PASSWORD_BREACH_CHECK_ENABLED?: string;
 
-  // Secrets (OAuth providers — wired in Session 4)
+  // Secrets (OAuth providers)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
-  FACEBOOK_APP_ID?: string;
-  FACEBOOK_APP_SECRET?: string;
-  APPLE_CLIENT_ID?: string;
-  APPLE_CLIENT_SECRET?: string;
-  APPLE_KEY_ID?: string;
-  APPLE_TEAM_ID?: string;
-  APPLE_PRIVATE_KEY?: string;
-  MICROSOFT_CLIENT_ID?: string;
-  MICROSOFT_CLIENT_SECRET?: string;
 }

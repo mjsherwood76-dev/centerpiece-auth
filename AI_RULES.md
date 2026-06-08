@@ -11,7 +11,7 @@
 It is a standalone Cloudflare Worker (production: `auth.centerpiecelab.com`, staging: `centerpiece-auth-staging.mjsherwood76.workers.dev`) that handles:
 
 - Email/password registration and login
-- OAuth via Google, Facebook, Apple, Microsoft
+- OAuth via Google
 - JWT (ES256) access token issuance
 - Refresh token management with rotation and theft detection
 - Password reset flows
@@ -144,10 +144,7 @@ src/
 ├── oauth/                 # OAuth provider integrations — Session 4
 │   ├── base.ts            # Shared OAuth utilities
 │   ├── callback.ts        # Shared callback handler
-│   ├── google.ts
-│   ├── facebook.ts
-│   ├── apple.ts
-│   └── microsoft.ts
+│   └── google.ts
 └── pages/                 # HTML page renderers — Session 2
     ├── renderer.ts        # Base HTML renderer
     ├── login.ts

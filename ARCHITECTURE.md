@@ -188,12 +188,6 @@ These are the SAME KV namespaces used by `centerpiece-site-runtime` — shared r
 |-------|--------|---------|
 | `/oauth/google` | GET | Initiate Google OAuth (OIDC, PKCE) |
 | `/oauth/google/callback` | GET | Google OAuth callback |
-| `/oauth/facebook` | GET | Initiate Facebook OAuth |
-| `/oauth/facebook/callback` | GET | Facebook OAuth callback |
-| `/oauth/apple` | GET | Initiate Apple OAuth (OIDC) |
-| `/oauth/apple/callback` | POST | Apple OAuth callback (form_post) |
-| `/oauth/microsoft` | GET | Initiate Microsoft OAuth (OIDC, PKCE) |
-| `/oauth/microsoft/callback` | GET | Microsoft OAuth callback |
 
 ---
 
@@ -265,7 +259,7 @@ All responses include:
 
 ### OAuth Architecture
 
-**Providers:** Google, Facebook, Apple, Microsoft
+**Providers:** Google
 
 **Flow:**
 1. User clicks OAuth button → `GET /oauth/{provider}?tenant=...&redirect=...`
@@ -277,13 +271,11 @@ All responses include:
 7. Resolves user: find by OAuth link → find by email (if verified) → create new
 8. Issues refresh token + authorization code, redirects to tenant
 
-**PKCE:** Code verifier + S256 challenge for Google and Microsoft. Facebook and Apple
-do not support PKCE but we store verifiers for consistency.
+**PKCE:** Code verifier + S256 challenge for Google.
 
 **Email Linking Rules:**
 - Provider confirms `email_verified === true` → link to existing user with same email
 - Provider does NOT verify email → create separate user (prevents account takeover)
-- Apple: email always verified; name only on first login
 
 **State Storage:** `oauth_states` D1 table with 5-minute TTL, consumed on callback (single-use)
 
@@ -299,7 +291,7 @@ do not support PKCE but we store verifiers for consistency.
 | `CANONICAL_INPUTS` KV | Shared KV namespace (uploaded by `centerpiece-dev`) | KV read (read-only) | Theme tokens (brands, styles) for tenant-branded login pages |
 | `TENANT_CONFIGS` KV | Shared KV namespace | KV read (read-only) | Tenant configuration for domain validation and branding |
 | D1 database (`AUTH_DB`) | Cloudflare D1 | SQL queries | Users, memberships, OAuth accounts, tokens, auth codes, password resets |
-| OAuth provider tokens | Google, Facebook, Apple, Microsoft | HTTPS callback | Authorization codes exchanged for ID tokens |
+| OAuth provider tokens | Google | HTTPS callback | Authorization codes exchanged for ID tokens |
 | Stripe/CPL secrets | Cloudflare Secrets | Environment variables | API keys, signing keys (never in source) |
 
 ### Outputs
