@@ -25,7 +25,7 @@ import { handleLogin } from './handlers/login.js';
 import { handleTokenExchange } from './handlers/token.js';
 import { handlePkceInit } from './handlers/pkceInit.js';
 import { handleRefresh } from './handlers/refresh.js';
-import { handleLogout, handleLogoutAll } from './handlers/logout.js';
+import { handleLogout, handleLogoutAll, handleLogoutRedirect } from './handlers/logout.js';
 import { handleGoogleOAuthInit, handleGoogleOAuthCallback } from './oauth/google.js';
 import { handleForgotPassword } from './handlers/forgotPassword.js';
 import { handleResetPassword } from './handlers/resetPassword.js';
@@ -228,6 +228,19 @@ export default {
 
       if (method === 'POST' && path === '/api/logout') {
         response = await handleLogout(request, env);
+        logAuthEvent(logger, {
+          event: 'logout',
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          correlationId,
+        });
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      // Top-level navigation logout (admin SPA) — revoke + 302 back to caller.
+      if (method === 'GET' && path === '/api/logout') {
+        response = await handleLogoutRedirect(request, env);
         logAuthEvent(logger, {
           event: 'logout',
           ip: clientIp,
