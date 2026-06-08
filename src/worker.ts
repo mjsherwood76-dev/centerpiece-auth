@@ -35,6 +35,7 @@ import { handleMemberships } from './handlers/memberships.js';
 import { handleSwitchTenant } from './handlers/switchTenant.js';
 import { handleStepUp } from './handlers/stepUp.js';
 import { handleInternalMemberships } from './handlers/internalMemberships.js';
+import { handleInternalInvites } from './handlers/internalInvites.js';
 import { handleInternalCustomerAuth } from './handlers/internalCustomerAuth.js';
 import { handleInternalUserLookup } from './handlers/internalUsers.js';
 import { handleInternalCustomers } from './handlers/internalCustomers.js';
@@ -341,6 +342,21 @@ export default {
         response = await handleInternalMemberships(request, env);
         logAuthEvent(logger, {
           event: `internal_membership_${method.toLowerCase()}`,
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          statusCode: response.status,
+          correlationId,
+        });
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      // --- Internal Team-Invite API (Fix_Team_Invites S3) ---
+      // Called via platform-api → AUTH Service Binding; gated by X-CP-Internal-Secret.
+      if (path.startsWith('/api/internal/invites')) {
+        response = await handleInternalInvites(request, env);
+        logAuthEvent(logger, {
+          event: `internal_invite_${method.toLowerCase()}`,
           ip: clientIp,
           route: path,
           userAgent: request.headers.get('User-Agent'),
