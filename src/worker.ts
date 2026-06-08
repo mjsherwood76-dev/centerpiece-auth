@@ -22,6 +22,7 @@ import { handleLoginPage } from './pages/login.js';
 import { handleRegisterPage } from './pages/register.js';
 import { handleRegister } from './handlers/register.js';
 import { handleLogin } from './handlers/login.js';
+import { handleAcceptInvitePage, handleAcceptInvite } from './handlers/acceptInvite.js';
 import { handleTokenExchange } from './handlers/token.js';
 import { handlePkceInit } from './handlers/pkceInit.js';
 import { handleRefresh } from './handlers/refresh.js';
@@ -172,6 +173,12 @@ export default {
         return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
       }
 
+      // Accept-invite page (Fix_Team_Invites S4) — public, token-gated.
+      if (method === 'GET' && path === '/accept-invite') {
+        response = await handleAcceptInvitePage(request, env);
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
       if (method === 'GET' && path === '/verify-email') {
         response = await handleVerifyEmail(request, env);
         logAuthEvent(logger, {
@@ -190,6 +197,20 @@ export default {
         response = await handleRegister(request, env);
         logAuthEvent(logger, {
           event: 'register_attempt',
+          ip: clientIp,
+          route: path,
+          userAgent: request.headers.get('User-Agent'),
+          statusCode: response.status,
+          correlationId,
+        });
+        return addSecurityHeaders(response, trace.getResponseHeaders(), request, env);
+      }
+
+      // Accept-invite submit (Fix_Team_Invites S4) — register/sign-in → membership → session.
+      if (method === 'POST' && path === '/accept-invite') {
+        response = await handleAcceptInvite(request, env);
+        logAuthEvent(logger, {
+          event: 'invite_accept_attempt',
           ip: clientIp,
           route: path,
           userAgent: request.headers.get('User-Agent'),
