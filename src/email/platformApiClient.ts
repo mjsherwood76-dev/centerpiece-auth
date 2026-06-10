@@ -46,13 +46,19 @@ function isResult(value: unknown): value is TransactionalEmailResult {
 export async function sendViaPlatformApi(
   binding: PlatformApiEmailBinding | undefined,
   input: TransactionalEmailInput,
+  internalSecret?: string,
 ): Promise<TransactionalEmailResult | null> {
   if (!binding) return null;
 
   try {
     const response = await binding.fetch(INTERNAL_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // platform-api gates /api/internal/* on the shared internal secret
+        // (2026-06-10 audit Wave 1 §2.4)
+        ...(internalSecret ? { 'X-CP-Internal-Secret': internalSecret } : {}),
+      },
       body: JSON.stringify(input),
     });
 

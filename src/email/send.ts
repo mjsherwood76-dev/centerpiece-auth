@@ -86,7 +86,7 @@ async function tryTemplateRenderer(
   input: Parameters<typeof sendViaPlatformApi>[1],
 ): Promise<TransactionalEmailResult | null> {
   try {
-    const result = await sendViaPlatformApi(env.PLATFORM_API, input);
+    const result = await sendViaPlatformApi(env.PLATFORM_API, input, env.INTERNAL_SECRET);
     if (result?.status === 'skipped' && result.reason === 'template_renderer_disabled') return null;
     return result;
   } catch {
