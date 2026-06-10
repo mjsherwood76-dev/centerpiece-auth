@@ -215,6 +215,16 @@ async function handleRefreshTokenGrant(
     return tokenError('invalid_grant', 'Refresh token is invalid.');
   }
 
+  // ── Client binding (review C2) ──
+  // The token must have been issued to the authenticating client via this
+  // endpoint. First-party session tokens (login/register/cookie-refresh flows)
+  // have client_id NULL and can NEVER be rotated through the third-party
+  // grant. Checked before any state change; the error is indistinguishable
+  // from an unknown token so clients can't probe other clients' tokens.
+  if (existing.client_id === null || existing.client_id !== authenticatedClientId) {
+    return tokenError('invalid_grant', 'Refresh token is invalid.');
+  }
+
   // Reuse / theft detection: a presented-but-revoked token revokes the family.
   if (existing.revoked_at !== null) {
     await db.revokeRefreshTokenFamily(existing.family_id);
@@ -223,6 +233,20 @@ async function handleRefreshTokenGrant(
 
   if (existing.expires_at <= now) {
     return tokenError('invalid_grant', 'Refresh token has expired.');
+  }
+
+  // ── Scope enforcement (review M3, RFC 6749 §6) ──
+  // The refreshed grant is limited to the scopes granted at issuance. A
+  // requested scope may only narrow, never broaden. Checked before rotation
+  // so an invalid_scope request doesn't burn the presented token.
+  const grantedScopes = (existing.granted_scopes ?? '').split(/\s+/).filter(Boolean);
+  let scopes = grantedScopes;
+  if (scopeParam) {
+    const requested = scopeParam.split(/\s+/).filter(Boolean);
+    if (requested.some((s) => !grantedScopes.includes(s))) {
+      return tokenError('invalid_scope', 'Requested scope exceeds the originally granted scope.');
+    }
+    scopes = requested;
   }
 
   // Rotate: revoke old, issue new in the same family (existing helper handles
@@ -248,11 +272,6 @@ async function handleRefreshTokenGrant(
   if (!user) {
     return tokenError('invalid_grant', 'The authorizing user no longer exists.');
   }
-
-  // Re-issue with the requested scope (RFC 6749 §6 — narrowing only is not
-  // enforced in v1; v1 simply echoes the requested or empty scope). The acting
-  // client is the authenticated client on THIS request.
-  const scopes = scopeParam ? scopeParam.split(/\s+/).filter(Boolean) : [];
 
   return issueTokens(env, db, {
     user,
@@ -301,7 +320,9 @@ async function issueTokens(
   if (params.existingRefreshToken) {
     refreshToken = params.existingRefreshToken;
   } else {
-    // Mint a brand-new refresh-token family for this delegated grant.
+    // Mint a brand-new refresh-token family for this delegated grant, bound
+    // to the issuing client with its granted scopes (migration 0013) so the
+    // refresh grant can enforce both (review C2/M3).
     const refreshTtlDays = parseInt(env.REFRESH_TOKEN_TTL_DAYS || '30', 10);
     refreshToken = generateRefreshToken();
     const refreshTokenHash = await hashRefreshToken(refreshToken);
@@ -314,6 +335,8 @@ async function issueTokens(
       family_id: familyId,
       expires_at: now + refreshTtlDays * 24 * 60 * 60,
       login_iat: now,
+      client_id: params.clientId,
+      granted_scopes: params.scopes.length > 0 ? params.scopes.join(' ') : null,
     });
   }
 

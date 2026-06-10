@@ -61,6 +61,9 @@ interface RefreshRecord {
   expires_at: number;
   revoked_at: string | null;
   login_iat: number;
+  // migration 0013 client binding
+  client_id: string | null;
+  granted_scopes: string | null;
 }
 interface UserRecord {
   id: string;
@@ -143,13 +146,33 @@ class MockStatement {
         expires_at: p[4] as number,
         revoked_at: null,
         login_iat: (p[10] as number) ?? 0,
+        client_id: (p[11] as string | null) ?? null,
+        granted_scopes: (p[12] as string | null) ?? null,
       };
       this.db.refresh.set(rec.token_hash, rec);
       return { meta: { changes: 1 } };
     }
-    if (s.startsWith('UPDATE refresh_tokens SET revoked_at')) {
-      // Family/single revocation paths — not exercised by the happy-path tests.
+    if (s.startsWith('UPDATE refresh_tokens SET revoked_at = datetime(\'now\'), last_used_at')) {
+      // Single-token revocation during rotation (matched by token_hash).
+      const hash = this.params[0] as string;
+      const row = this.db.refresh.get(hash);
+      if (row && row.revoked_at === null) {
+        row.revoked_at = new Date().toISOString();
+        return { meta: { changes: 1 } };
+      }
       return { meta: { changes: 0 } };
+    }
+    if (s.startsWith('UPDATE refresh_tokens SET revoked_at')) {
+      // Family revocation (theft detection).
+      const familyId = this.params[0] as string;
+      let changes = 0;
+      for (const row of this.db.refresh.values()) {
+        if (row.family_id === familyId && row.revoked_at === null) {
+          row.revoked_at = new Date().toISOString();
+          changes++;
+        }
+      }
+      return { meta: { changes } };
     }
     throw new Error(`MockStatement.run: unhandled SQL: ${s}`);
   }
@@ -168,8 +191,8 @@ function makeEnv(db: MockDB): Env {
   const pubPem = publicKey.export({ type: 'spki', format: 'pem' }) as string;
 
   // Minimal KV stub — redirect validator only reads `domain:<host>` keys; our
-  // test redirect_uri uses a controlled suffix (.workers.dev) so the validator
-  // never needs a KV hit, but get() must exist.
+  // test redirect_uri uses a controlled suffix (.centerpiecelab.com) so the
+  // validator never needs a KV hit, but get() must exist.
   const kv = { get: async () => null } as unknown as KVNamespace;
 
   return {
@@ -199,8 +222,15 @@ function makeEnv(db: MockDB): Env {
 
 const CLIENT_ID = 'client-acme-mcp';
 const CLIENT_SECRET = 'a'.repeat(64);
-const REDIRECT_URI = 'https://acme-bridge.workers.dev/callback';
+// Must be a platform-controlled hostname: since the C1 open-redirect fix,
+// arbitrary *.workers.dev hosts are no longer controlled, and /oauth/authorize
+// validates the registered redirect_uri against the platform redirect
+// validator in addition to the client's allow-list.
+const REDIRECT_URI = 'https://acme-bridge.centerpiecelab.com/callback';
 const USER_ID = 'user-seller-1';
+// Second registered client for cross-client refresh-binding tests.
+const OTHER_CLIENT_ID = 'client-other-agent';
+const OTHER_CLIENT_SECRET = 'b'.repeat(64);
 
 // PKCE verifier + S256 challenge (base64url of SHA256(verifier)).
 const CODE_VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
@@ -222,6 +252,17 @@ async function seed(db: MockDB) {
     contact_email: null,
   });
   db.users.set(USER_ID, { id: USER_ID, email: 'seller@example.com', name: 'Seller One' });
+  db.clients.set(OTHER_CLIENT_ID, {
+    client_id: OTHER_CLIENT_ID,
+    client_secret_hash: await hashPassword(OTHER_CLIENT_SECRET),
+    client_name: 'Other Agent',
+    redirect_uris_json: JSON.stringify(['https://other-agent.centerpiecelab.com/callback']),
+    allowed_scopes_json: JSON.stringify(['orders:read']),
+    created_at: 1,
+    created_by_user_id: 'admin-1',
+    status: 'active',
+    contact_email: null,
+  });
 }
 
 /** Seed a live refresh-token session for USER_ID; returns the cookie header. */
@@ -237,6 +278,8 @@ async function seedSession(db: MockDB, env: Env): Promise<string> {
     expires_at: now + 86400,
     revoked_at: null,
     login_iat: now,
+    client_id: null, // first-party session token — never rotatable via /oauth/token
+    granted_scopes: null,
   });
   return `cp_refresh=${plaintext}`;
 }
@@ -531,7 +574,7 @@ describe('POST /oauth/token (authorization_code + PKCE)', () => {
       tokenRequest({
         grant_type: 'authorization_code',
         code,
-        redirect_uri: 'https://acme-bridge.workers.dev/other',
+        redirect_uri: 'https://acme-bridge.centerpiecelab.com/other',
         code_verifier: CODE_VERIFIER,
       }),
       env,
@@ -562,5 +605,138 @@ describe('POST /oauth/token (authorization_code + PKCE)', () => {
     const res = await handleOauthToken(badReq, env);
     assert.equal(res.status, 401);
     assert.equal(((await res.json()) as Record<string, string>).error, 'invalid_client');
+  });
+});
+
+// ─── refresh_token grant — client binding (review C2/M3) ────
+
+/** Exchange a fresh code for tokens; returns the response body. */
+async function exchangeCode(db: MockDB, env: Env): Promise<Record<string, unknown>> {
+  const code = await mintCode(db, env);
+  const res = await handleOauthToken(
+    tokenRequest({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: REDIRECT_URI,
+      code_verifier: CODE_VERIFIER,
+    }),
+    env,
+  );
+  assert.equal(res.status, 200, `exchange failed: ${await res.clone().text()}`);
+  return (await res.json()) as Record<string, unknown>;
+}
+
+function refreshRequest(
+  refreshToken: string,
+  opts: { clientId?: string; clientSecret?: string; scope?: string } = {},
+): Request {
+  const body: Record<string, string> = {
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+  };
+  if (opts.scope !== undefined) body.scope = opts.scope;
+  return new Request('https://auth.test/oauth/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization:
+        'Basic ' +
+        Buffer.from(
+          `${opts.clientId ?? CLIENT_ID}:${opts.clientSecret ?? CLIENT_SECRET}`,
+        ).toString('base64'),
+    },
+    body: new URLSearchParams(body).toString(),
+  });
+}
+
+describe('POST /oauth/token (refresh_token grant — client binding)', () => {
+  it('same client rotates its own token → 200, scope preserved from issuance', async () => {
+    const db = new MockDB();
+    const env = makeEnv(db);
+    await seed(db);
+    const issued = await exchangeCode(db, env);
+
+    const res = await handleOauthToken(refreshRequest(issued.refresh_token as string), env);
+    assert.equal(res.status, 200, `body: ${await res.clone().text()}`);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.ok(body.access_token, 'access_token present');
+    assert.ok(body.refresh_token, 'rotated refresh_token present');
+    assert.notEqual(body.refresh_token, issued.refresh_token, 'token was rotated');
+    assert.equal(body.scope, 'orders:read', 'granted scope carried, not echoed from request');
+  });
+
+  it('a DIFFERENT registered client cannot rotate the token → 400 invalid_grant (C2)', async () => {
+    const db = new MockDB();
+    const env = makeEnv(db);
+    await seed(db);
+    const issued = await exchangeCode(db, env);
+
+    const res = await handleOauthToken(
+      refreshRequest(issued.refresh_token as string, {
+        clientId: OTHER_CLIENT_ID,
+        clientSecret: OTHER_CLIENT_SECRET,
+      }),
+      env,
+    );
+    assert.equal(res.status, 400);
+    assert.equal(((await res.clone().json()) as Record<string, string>).error, 'invalid_grant');
+
+    // And the legitimate client can still use it afterwards (no state burned).
+    const legit = await handleOauthToken(refreshRequest(issued.refresh_token as string), env);
+    assert.equal(legit.status, 200, 'cross-client attempt must not consume the token');
+  });
+
+  it('a first-party session token (client_id NULL) cannot be rotated → 400 invalid_grant (C2)', async () => {
+    const db = new MockDB();
+    const env = makeEnv(db);
+    await seed(db);
+    // seedSession stores a first-party (client_id NULL) refresh token.
+    const cookie = await seedSession(db, env);
+    const plaintext = cookie.split('=')[1];
+
+    const res = await handleOauthToken(refreshRequest(plaintext), env);
+    assert.equal(res.status, 400);
+    assert.equal(((await res.json()) as Record<string, string>).error, 'invalid_grant');
+  });
+
+  it('requested scope may narrow but not broaden → 400 invalid_scope (M3)', async () => {
+    const db = new MockDB();
+    const env = makeEnv(db);
+    await seed(db);
+    const issued = await exchangeCode(db, env); // granted: orders:read
+
+    const broaden = await handleOauthToken(
+      refreshRequest(issued.refresh_token as string, { scope: 'orders:read orders:write' }),
+      env,
+    );
+    assert.equal(broaden.status, 400);
+    assert.equal(((await broaden.json()) as Record<string, string>).error, 'invalid_scope');
+
+    // Narrowing (same single scope) still works and doesn't burn the token.
+    const narrow = await handleOauthToken(
+      refreshRequest(issued.refresh_token as string, { scope: 'orders:read' }),
+      env,
+    );
+    assert.equal(narrow.status, 200, `body: ${await narrow.clone().text()}`);
+    assert.equal(((await narrow.json()) as Record<string, unknown>).scope, 'orders:read');
+  });
+
+  it('rotated token stays bound: old token reuse is rejected and revokes the family', async () => {
+    const db = new MockDB();
+    const env = makeEnv(db);
+    await seed(db);
+    const issued = await exchangeCode(db, env);
+
+    const first = await handleOauthToken(refreshRequest(issued.refresh_token as string), env);
+    assert.equal(first.status, 200);
+    const rotated = ((await first.json()) as Record<string, unknown>).refresh_token as string;
+
+    // Replay of the OLD token → theft detection (family revoked).
+    const replay = await handleOauthToken(refreshRequest(issued.refresh_token as string), env);
+    assert.equal(replay.status, 400);
+
+    // The rotated token's family was revoked, so it is now rejected too.
+    const afterTheft = await handleOauthToken(refreshRequest(rotated), env);
+    assert.equal(afterTheft.status, 400, 'family revocation must cover the rotated token');
   });
 });

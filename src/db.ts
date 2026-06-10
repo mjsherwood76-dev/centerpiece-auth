@@ -334,13 +334,16 @@ export class AuthDB {
     device_label?: string | null;
     device_fingerprint?: string | null;
     login_iat?: number;           // Unix seconds; defaults to 0 (backfilled by migration)
+    client_id?: string | null;    // third-party OAuth client binding (migration 0013); NULL = first-party
+    granted_scopes?: string | null; // space-delimited scopes granted at issuance (migration 0013)
   }): Promise<void> {
     await this.db
       .prepare(
         `INSERT INTO refresh_tokens
            (id, user_id, token_hash, family_id, expires_at, ip, user_agent,
-            device_remembered, device_label, device_fingerprint, login_iat)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            device_remembered, device_label, device_fingerprint, login_iat,
+            client_id, granted_scopes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         token.id,
@@ -354,6 +357,8 @@ export class AuthDB {
         token.device_label ?? null,
         token.device_fingerprint ?? null,
         token.login_iat ?? 0,
+        token.client_id ?? null,
+        token.granted_scopes ?? null,
       )
       .run();
   }
@@ -409,10 +414,14 @@ export class AuthDB {
       .run();
 
     // Insert new token, carrying forward login_iat from the old row so the
-    // original login timestamp is preserved across rotations.
+    // original login timestamp is preserved across rotations, and the client
+    // binding + granted scopes (migration 0013) so a rotated third-party
+    // token stays bound to the client it was issued to.
     await this.insertRefreshToken({
       ...newToken,
       login_iat: existing.login_iat,
+      client_id: existing.client_id,
+      granted_scopes: existing.granted_scopes,
     });
 
     return { success: true, reuseDetected: false };

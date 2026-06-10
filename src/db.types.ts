@@ -79,4 +79,7 @@ export interface RefreshTokenRow {
   device_label: string | null; // display-only UA parse; format may drift
   device_fingerprint: string | null; // sha256(UA | cfCountry)
   login_iat: number; // Unix seconds of the original login event; preserved across rotations
+  // Added by migration 0013 (refresh-token client binding, review C2/M3)
+  client_id: string | null; // third-party OAuth client the token was issued to; NULL = first-party session token
+  granted_scopes: string | null; // space-delimited scopes granted at issuance; NULL for first-party tokens
 }
