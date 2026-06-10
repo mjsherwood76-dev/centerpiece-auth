@@ -91,7 +91,7 @@ Staging: `auth.centerpiecelab.dev/*` on zone `centerpiecelab.dev` (`[[env.stagin
 - **OAuth email linking**: only auto-link when provider confirms `email_verified === true`; unverified email → create separate user.
 - **Token security**: never store plaintext auth codes / refresh tokens / reset tokens — always SHA-256 hashes. Refresh-token rotation with reuse/theft detection. JWTs ES256 (asymmetric); no shared secrets.
 - **D1**: run `PRAGMA foreign_keys = ON` on every connection; use prepared statements; constant-time comparison for token/hash checks.
-- **Don't import** from `centerpiece-site-runtime` (or any sibling code repo) or from `mjs76-dev-standards`.
+- **Don't import** from `centerpiece-site-runtime` (or any sibling code repo).
 - **Don't hardcode** tenant IDs or domains.
 
 ## Pointers

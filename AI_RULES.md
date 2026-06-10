@@ -107,7 +107,6 @@ NOT the other way around.
 - Import code from `centerpiece-site-runtime` or any other runtime repo
 - Hardcode tenant IDs or domains
 - Skip redirect validation on any redirect-producing handler
-- Import from `mjs76-dev-standards` (it is NOT part of Centerpiece)
 
 ---
 
