@@ -13,7 +13,7 @@
  * - Store redirect_origin with the auth code and enforce match at exchange time.
  */
 
-import { CONTROLLED_SUFFIXES } from './platformDomains.js';
+import { isControlledHostname } from './platformDomains.js';
 
 /** Dev-only allowed origins (http localhost). */
 const DEV_HOSTS = ['localhost', '127.0.0.1'];
@@ -105,10 +105,11 @@ export async function validateRedirectUrl(
     return invalid('Redirect URL must not contain fragments');
   }
 
-  // 6. Check controlled suffixes — always allowed for any environment
-  const isControlledDomain = CONTROLLED_SUFFIXES.some((suffix) =>
-    hostname.endsWith(suffix)
-  );
+  // 6. Check controlled hosts/suffixes — always allowed for any environment.
+  // Exact platform hosts on public deploy suffixes (workers.dev / pages.dev)
+  // are matched exactly; arbitrary hosts on those suffixes are NOT controlled
+  // (open-redirect fix, 2026-06-10 review C1).
+  const isControlledDomain = isControlledHostname(hostname);
 
   // 7. Check localhost in dev
   const isDevLocalhost = isDev && DEV_HOSTS.includes(hostname);

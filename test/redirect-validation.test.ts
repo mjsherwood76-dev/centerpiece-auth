@@ -38,7 +38,7 @@ describe('Redirect URL validation', () => {
     assert.notEqual(error, 'invalid_redirect', 'should accept .centerpiece.app');
   });
 
-  it('should accept *.workers.dev (staging)', async () => {
+  it('should reject arbitrary *.workers.dev (public deploy suffix — open-redirect fix)', async () => {
     const res = await postForm('/api/register', {
       email: uniqueEmail(),
       password: 'SecurePass123!',
@@ -49,7 +49,21 @@ describe('Redirect URL validation', () => {
     });
 
     const error = getLocationParam(res, 'error');
-    assert.notEqual(error, 'invalid_redirect', 'should accept .workers.dev');
+    assert.equal(error, 'invalid_redirect', 'arbitrary .workers.dev hosts must be rejected (review C1)');
+  });
+
+  it('should accept the exact platform staging fallback host on workers.dev', async () => {
+    const res = await postForm('/api/register', {
+      email: uniqueEmail(),
+      password: 'SecurePass123!',
+      confirmPassword: 'SecurePass123!',
+      name: 'Test',
+      tenant: 'test',
+      redirect: 'https://centerpiece-site-runtime-staging.mjsherwood76.workers.dev/',
+    });
+
+    const error = getLocationParam(res, 'error');
+    assert.notEqual(error, 'invalid_redirect', 'exact CONTROLLED_HOSTS entry should be accepted');
   });
 
   it('should reject unknown domain', async () => {

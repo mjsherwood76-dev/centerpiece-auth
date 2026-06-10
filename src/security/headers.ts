@@ -11,7 +11,7 @@
  * Also provides a proper CORS preflight handler with origin validation.
  */
 import type { Env } from '../types.js';
-import { CONTROLLED_SUFFIXES } from './platformDomains.js';
+import { CONTROLLED_SUFFIXES, CONTROLLED_HOSTS, isControlledHostname } from './platformDomains.js';
 
 /** Dev-only allowed origins. */
 const DEV_ORIGINS = ['http://localhost', 'http://127.0.0.1'];
@@ -77,7 +77,10 @@ export function addSecurityHeaders(
           // CSP Level 3 checks redirect destinations after form POST,
           // so form-action must include origins the server redirects to
           // (e.g. admin panel callback after login).
-          `form-action 'self' ${CONTROLLED_SUFFIXES.map(s => `https://*${s}`).join(' ')}`,
+          `form-action 'self' ${[
+            ...CONTROLLED_SUFFIXES.map(s => `https://*${s}`),
+            ...CONTROLLED_HOSTS.map(h => `https://${h}`),
+          ].join(' ')}`,
           // Block embedding in frames
           "frame-ancestors 'none'",
           // Base URI restriction
@@ -150,10 +153,10 @@ function isAllowedOrigin(origin: string, env: Env): boolean {
     const url = new URL(origin);
     const hostname = url.hostname;
 
-    // Check controlled suffixes
-    for (const suffix of CONTROLLED_SUFFIXES) {
-      if (hostname.endsWith(suffix)) return true;
-    }
+    // Check controlled hosts + suffixes (exact platform hosts on public
+    // deploy suffixes; arbitrary workers.dev/pages.dev origins are NOT
+    // allowed — credentialed-CORS fix, 2026-06-10 review H1)
+    if (isControlledHostname(hostname)) return true;
 
     // Check dev origins
     const isDev = env.ENVIRONMENT !== 'production';
