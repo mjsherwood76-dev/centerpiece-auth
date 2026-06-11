@@ -105,6 +105,12 @@ NOT the other way around.
 - Store plaintext secrets, tokens, or codes in D1
 - Auto-create memberships with contexts other than `customer`
 - Import code from `centerpiece-site-runtime` or any other runtime repo
+  — **sole sanctioned exception (ADR-019, codified by ruling D9 2026-06-11):**
+  the shared `RateLimiter`/`AUTH_POLICIES`/`matchPolicy` imports from
+  `@centerpiece/site-compositor/security` (via the `file:` workspace link,
+  wrapped by `src/security/applyRateLimit.ts`), so public-ingress-adjacent
+  Workers share one limiter implementation and the `RATE_LIMIT_KV` namespace.
+  No composition logic may be imported; auth ↔ runtime remain HTTP peers.
 - Hardcode tenant IDs or domains
 - Skip redirect validation on any redirect-producing handler
 
