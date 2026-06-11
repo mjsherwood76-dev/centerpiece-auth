@@ -15,9 +15,9 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --tsconfig tsconfig.json --test test/**/*.test.ts",
     "test:integration": "tsx --tsconfig tsconfig.json --test test/integration.schema.test.ts",
-    "db:migrate:local": "wrangler d1 execute centerpiece-auth-db --local --file=migrations/0001_initial_schema.sql",
-    "db:migrate:staging": "wrangler d1 execute centerpiece-auth-db --env staging --file=migrations/0001_initial_schema.sql",
-    "db:migrate:prod": "wrangler d1 execute centerpiece-auth-db --file=migrations/0001_initial_schema.sql"
+    "db:migrate:local": "wrangler d1 migrations apply centerpiece-auth-db --local",
+    "db:migrate:staging": "wrangler d1 migrations apply centerpiece-auth-db --env staging --remote",
+    "db:migrate:prod": "wrangler d1 migrations apply centerpiece-auth-db --remote"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260206.0",
