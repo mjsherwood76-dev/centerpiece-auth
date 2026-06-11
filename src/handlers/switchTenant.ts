@@ -76,8 +76,13 @@ export async function handleSwitchTenant(request: Request, env: Env): Promise<Re
   const db = new AuthDB(env.AUTH_DB);
   await db.enableForeignKeys();
 
-  // ── Determine if platform admin ──
-  const isPlatformOwner = payload.contexts?.['platform'] !== undefined;
+  // ── Determine if platform OWNER (ruling D14, 2026-06-11) ──
+  // Only the platform `owner` sub-role gets the scope-to-any-tenant bypass.
+  // Other platform sub-roles (support, finance, …) go through the normal
+  // membership check like everyone else — workspace RBAC doctrine says only
+  // the platform owner bypasses checks. The old `!== undefined` check granted
+  // the bypass to any platform context membership (audit L8).
+  const isPlatformOwner = payload.contexts?.['platform']?.includes('owner') ?? false;
 
   if (isPlatformOwner) {
     // Platform admin bypass: verify tenant exists and is active in TENANTS_DB
