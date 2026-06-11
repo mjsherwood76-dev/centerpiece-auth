@@ -190,7 +190,7 @@ function buildBaseLayout(
                 &copy; ${new Date().getFullYear()} ${storeName}
               </p>
               <p style="margin:4px 0 0;font-size:11px;color:#9ca3af;font-family:${FONT_FAMILY};">
-                Powered by Centerpiece Lab
+                Runs on Centerpiece Lab
               </p>
             </td>
           </tr>

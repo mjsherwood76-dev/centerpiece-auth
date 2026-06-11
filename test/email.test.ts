@@ -321,13 +321,13 @@ describe('buildPasswordResetEmail', () => {
     assert.ok(result.text.includes('30 minutes'));
   });
 
-  it('should contain Powered by Centerpiece Lab footer', () => {
+  it('should contain Runs on Centerpiece Lab footer', () => {
     const result = buildPasswordResetEmail({
       branding: { storeName: 'My Store', logoUrl: null, primaryColor: '#2563eb', backgroundColor: '#fff' },
       resetUrl: 'https://test.com/reset',
       expiresInMinutes: 60,
     });
-    assert.ok(result.html.includes('Powered by Centerpiece Lab'));
+    assert.ok(result.html.includes('Runs on Centerpiece Lab'));
   });
 
   it('should generate a subject line with store name', () => {
@@ -362,13 +362,13 @@ describe('buildWelcomeEmail', () => {
     assert.ok(result.text.includes('https://auth.test/login?tenant=test'));
   });
 
-  it('should contain Powered by Centerpiece Lab footer', () => {
+  it('should contain Runs on Centerpiece Lab footer', () => {
     const result = buildWelcomeEmail({
       branding: { storeName: 'My Store', logoUrl: null, primaryColor: '#2563eb', backgroundColor: '#fff' },
       userName: 'Alice',
       loginUrl: 'https://test.com/login',
     });
-    assert.ok(result.html.includes('Powered by Centerpiece Lab'));
+    assert.ok(result.html.includes('Runs on Centerpiece Lab'));
   });
 
   it('should NOT render HTML when user name contains HTML tags', () => {
@@ -429,14 +429,14 @@ describe('buildPasswordChangedEmail', () => {
     assert.ok(result.text.includes('https://auth.test/forgot-password?tenant=test'));
   });
 
-  it('should contain Powered by Centerpiece Lab footer', () => {
+  it('should contain Runs on Centerpiece Lab footer', () => {
     const result = buildPasswordChangedEmail({
       branding: { storeName: 'My Store', logoUrl: null, primaryColor: '#2563eb', backgroundColor: '#fff' },
       userEmail: 'user@example.com',
       changedAt: new Date().toISOString(),
       forgotPasswordUrl: 'https://auth.test/forgot-password',
     });
-    assert.ok(result.html.includes('Powered by Centerpiece Lab'));
+    assert.ok(result.html.includes('Runs on Centerpiece Lab'));
   });
 
   it('should escape store name with HTML characters', () => {
