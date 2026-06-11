@@ -16,7 +16,7 @@
     "test": "tsx --tsconfig tsconfig.json --test test/**/*.test.ts",
     "test:integration": "tsx --tsconfig tsconfig.json --test test/integration.schema.test.ts",
     "db:migrate:local": "wrangler d1 migrations apply centerpiece-auth-db --local",
-    "db:migrate:staging": "wrangler d1 migrations apply centerpiece-auth-db --env staging --remote",
+    "db:migrate:staging": "wrangler d1 migrations apply AUTH_DB --env staging --remote",
     "db:migrate:prod": "wrangler d1 migrations apply centerpiece-auth-db --remote"
   },
   "devDependencies": {
